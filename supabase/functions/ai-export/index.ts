@@ -1,5 +1,6 @@
 // Read-only export of the timeline for any AI: GET /functions/v1/ai-export?key=SECRET
 // Options: days=30 (1-3650), format=text|json|csv, view=timeline (default)|daily|both|references, photos=links
+// A single photo: ?key=…&photo=<id> (the links that photos=links produces)
 // Reference items (linked from entries as [[Name]]) are always included first, with each version's dates.
 // It can only read. The key is checked against a hash in export_keys.
 import { createClient } from "npm:@supabase/supabase-js@2.118.0";
@@ -60,11 +61,26 @@ Deno.serve(async (req) => {
   if (!k || k.revoked_at) return send("Invalid or revoked key.", "text/plain", 401);
   admin.from("export_keys").update({ last_used_at: new Date().toISOString() }).eq("key_hash", keyHash).then(() => {});
 
+  // A single photo by its short id (keeps photo links short enough for every AI's web reader)
+  const photoId = url.searchParams.get("photo");
+  if (photoId) {
+    if (!/^[0-9a-f-]{36}$/i.test(photoId)) return send("Bad photo id.", "text/plain", 400);
+    const { data: ep } = await admin.from("entry_photos").select("path").eq("id", photoId).eq("user_id", k.user_id).maybeSingle();
+    const { data: rv } = ep ? { data: null } : await admin.from("ref_versions").select("photo_path").eq("id", photoId).eq("user_id", k.user_id).maybeSingle();
+    const path = ep?.path || rv?.photo_path;
+    if (!path) return send("Photo not found.", "text/plain", 404);
+    const { data: file, error } = await admin.storage.from("photos").download(path);
+    if (error || !file) return send("Couldn't load that photo.", "text/plain", 500);
+    return new Response(file, { headers: { ...HEADERS, "Content-Type": "image/jpeg" } });
+  }
+
   const days = Math.min(3650, Math.max(1, parseInt(url.searchParams.get("days") || "30", 10) || 30));
   const format = (url.searchParams.get("format") || "text").toLowerCase();
   const view = (url.searchParams.get("view") || "timeline").toLowerCase();
   const withPhotoLinks = url.searchParams.get("photos") === "links";
   const since = new Date(Date.now() - days * 86400_000).toISOString().slice(0, 10);
+  const base = `${Deno.env.get("SUPABASE_URL")}/functions/v1/ai-export`;
+  const photoUrl = (id: string) => `${base}?key=${encodeURIComponent(key)}&photo=${id}`;
 
   const wantDaily = view === "daily" || view === "both", wantTimeline = view === "timeline" || view === "both";
   const [{ data: daily, error: e1 }, { data: timeline, error: e2 }] = await Promise.all([
@@ -81,16 +97,8 @@ Deno.serve(async (req) => {
 
   // Reference items: every version, with the dates it applied
   const { data: refRows } = await admin.from("ai_references")
-    .select("ref_id, name, description, photo_path, valid_from_local, valid_until_local, archived, archived_at_local")
+    .select("version_id, ref_id, name, description, photo_path, valid_from_local, valid_until_local, archived, archived_at_local")
     .eq("user_id", k.user_id).order("ref_id").order("valid_from_local");
-  const refPhotoLinks = new Map<string, string>();
-  if (withPhotoLinks) {
-    const paths = (refRows || []).map((r: any) => r.photo_path).filter(Boolean);
-    if (paths.length) {
-      const { data: signed } = await admin.storage.from("photos").createSignedUrls(paths, 7 * 86400);
-      for (const s2 of signed || []) if (s2.signedUrl) refPhotoLinks.set(s2.path, s2.signedUrl);
-    }
-  }
   const refMap = new Map<string, any>();
   for (const r of refRows || []) {
     const item = refMap.get(r.ref_id) || { name: r.name, archived: r.archived, archived_at: r.archived_at_local?.slice(0, 16).replace("T", " ") ?? null, versions: [] as any[] };
@@ -99,26 +107,18 @@ Deno.serve(async (req) => {
       name: r.name, from: r.valid_from_local?.slice(0, 16).replace("T", " "),
       until: r.valid_until_local ? r.valid_until_local.slice(0, 16).replace("T", " ") : null,
       description: r.description, has_photo: !!r.photo_path,
-      ...(withPhotoLinks && r.photo_path ? { photo_link: refPhotoLinks.get(r.photo_path) || null } : {}),
+      ...(withPhotoLinks && r.photo_path ? { photo_link: photoUrl(r.version_id) } : {}),
     });
     refMap.set(r.ref_id, item);
   }
   const references = [...refMap.values()].sort((a, b) => a.name.localeCompare(b.name));
 
-  // Optional photo links (valid 7 days)
+  // Optional photo links (short links served by this function)
   const photoLinks = new Map<string, string[]>();
   if (withPhotoLinks && timeline?.some((r: any) => r.photo_count > 0)) {
     const ids = timeline.filter((r: any) => r.photo_count > 0).map((r: any) => r.entry_id);
-    const { data: photos } = await admin.from("entry_photos").select("entry_id, path").in("entry_id", ids);
-    const paths = (photos || []).map((p: any) => p.path);
-    if (paths.length) {
-      const { data: signed } = await admin.storage.from("photos").createSignedUrls(paths, 7 * 86400);
-      const byPath = new Map((signed || []).map((s: any) => [s.path, s.signedUrl]));
-      for (const p of photos || []) {
-        const u = byPath.get(p.path); if (!u) continue;
-        photoLinks.set(p.entry_id, [...(photoLinks.get(p.entry_id) || []), u]);
-      }
-    }
+    const { data: photos } = await admin.from("entry_photos").select("id, entry_id").in("entry_id", ids);
+    for (const p of photos || []) photoLinks.set(p.entry_id, [...(photoLinks.get(p.entry_id) || []), photoUrl(p.id)]);
   }
 
   const tl = (timeline || []).map((r: any) => ({

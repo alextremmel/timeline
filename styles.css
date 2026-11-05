@@ -166,3 +166,6 @@ mark{background:color-mix(in srgb,var(--st-awake) 45%,transparent);color:inherit
 .bar .icon-btn{width:36px;border-color:transparent}
 .bar .icon-btn.changed{border-color:var(--edit)}
 .bar .send{margin-left:4px}
+
+/* while typing (or with text in the box), hide ⋯ so the text box gets more room */
+.composer.typing #moreMenuBtn{display:none}

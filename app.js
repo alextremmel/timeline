@@ -228,8 +228,12 @@ function autoGrow() {
   textEl.style.height = textEl.scrollHeight + 2 + "px";
   if (stick) toBottom();
 }
-textEl.addEventListener("input", autoGrow);
-textEl.addEventListener("focus", () => setTimeout(() => { fitViewport(); toBottom(); }, 300));
+textEl.addEventListener("input", () => { autoGrow(); updateTyping(); });
+function updateTyping() {
+  $("composer").classList.toggle("typing", document.activeElement === textEl || textEl.value.trim() !== "");
+}
+textEl.addEventListener("blur", () => setTimeout(updateTyping, 0));
+textEl.addEventListener("focus", () => { updateTyping(); setTimeout(() => { fitViewport(); toBottom(); }, 300); });
 
 function renderThumbs() {
   const box = $("thumbs"); box.replaceChildren(); box.hidden = !S.draft.photos.length;
@@ -271,7 +275,7 @@ $("photoInput").addEventListener("change", async e => {
 
 function resetComposer() {
   for (const p of S.draft.photos) if (p.blob) URL.revokeObjectURL(p.preview);
-  S.draft = freshDraft(); S.editing = null; textEl.value = ""; textEl.style.height = ""; $("whenRow").hidden = true;
+  S.draft = freshDraft(); S.editing = null; textEl.value = ""; textEl.style.height = ""; $("whenRow").hidden = true; updateTyping();
   $("editFlag").hidden = true; $("composer").classList.remove("editing"); $("saveBtn").setAttribute("aria-label", "Log entry");
   renderThumbs(); renderWhen();
 }

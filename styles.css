@@ -133,3 +133,36 @@ input[type=datetime-local]{border:1px solid var(--line);border-radius:10px;backg
 .lightbox{position:fixed;inset:0;z-index:30;background:var(--scrim);display:flex;align-items:center;justify-content:center;padding:calc(16px + env(safe-area-inset-top,0px)) 16px calc(16px + env(safe-area-inset-bottom,0px))}
 .lightbox img{max-width:100%;max-height:100%;object-fit:contain;border-radius:6px}
 @media (prefers-reduced-motion:no-preference){.item.new{animation:pop .6s ease-out}@keyframes pop{from{background:color-mix(in srgb,var(--edit) 14%,transparent)}to{background:transparent}}}
+
+/* tap = log again, hold = edit: keep iOS from selecting text or popping a menu on hold */
+.note-main{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+.note.pending{opacity:.7}
+.pending-note{margin:2px 0 0 72px;font-size:.75rem;color:var(--muted)}
+.entry-tools{margin-top:6px}
+
+/* search */
+.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.search-bar{display:flex;align-items:center;gap:10px;min-width:0}
+.search-bar input{flex:1 1 0;width:0;min-width:0;height:42px;border:1px solid var(--edit);border-radius:21px;background:var(--bg);padding:0 16px;font-size:16px;outline:none;-webkit-appearance:none;appearance:none}
+.search-count{margin-top:12px;font-size:.85rem;color:var(--muted);text-align:center}
+mark{background:color-mix(in srgb,var(--st-awake) 45%,transparent);color:inherit;border-radius:3px;padding:0 1px}
+
+/* the ⋯ panel */
+.sheet-backdrop{position:fixed;inset:0;z-index:25;background:rgba(8,12,11,.35)}
+.sheet{position:fixed;left:0;right:0;bottom:0;z-index:26;max-width:640px;margin:0 auto;background:var(--surface);border-radius:20px 20px 0 0;border:1px solid var(--line);border-bottom:0;
+  padding:8px max(16px,env(safe-area-inset-right,0px)) calc(16px + env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px));display:flex;flex-direction:column;gap:4px}
+.sheet-grip{width:40px;height:5px;border-radius:3px;background:var(--line);margin:2px auto 8px}
+.sheet-item{display:flex;flex-direction:column;align-items:flex-start;gap:2px;text-align:left;background:none;border:0;border-radius:12px;padding:12px 10px;min-height:48px}
+.sheet-item:active{background:var(--sunk)}
+.sheet-title{font-weight:700}
+.sheet-sub{font-size:.8rem;color:var(--muted)}
+.sheet-status{display:flex;flex-direction:column;gap:6px;border-top:1px solid var(--line);border-bottom:1px solid var(--line);margin:6px 0;padding:12px 10px;font-size:.85rem}
+.status-line{display:flex;justify-content:space-between;align-items:center;gap:12px}
+.warn{color:var(--danger)}
+.sheet-signout .sheet-title{color:var(--danger);font-weight:400}
+
+/* log bar: four controls, keep the text box roomy */
+.bar{gap:4px}
+.bar .icon-btn{width:36px;border-color:transparent}
+.bar .icon-btn.changed{border-color:var(--edit)}
+.bar .send{margin-left:4px}

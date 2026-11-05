@@ -37,6 +37,8 @@ const S = {
   user: null, entries: new Map(), oldestTs: null, hasMore: false, loading: false, loaded: false,
   draft: null, editing: null, lastAdded: null, openId: null, confirmId: null,
   urls: new Map(), // storage path -> {url, exp}
+  pending: new Map(), // entries saved on the phone, waiting to send
+  searching: false, searchQ: "", searchResults: null, flushing: false,
 };
 const freshDraft = () => ({ photos: [], whenMs: null });
 S.draft = freshDraft();
@@ -65,7 +67,7 @@ window.addEventListener("resize", fitViewport);
 
 // Load older entries when scrolled near the top.
 scroller.addEventListener("scroll", () => {
-  if (scroller.scrollTop < 300 && S.hasMore && !S.loading && S.user) loadEntries(false);
+  if (scroller.scrollTop < 300 && S.hasMore && !S.loading && S.user && !S.searching) loadEntries(false);
 }, { passive: true });
 
 /* ---------- auth ---------- */
@@ -75,7 +77,7 @@ async function showForSession(session) {
   shell.hidden = !S.user;
   document.body.classList.toggle("app-on", !!S.user);
   if (S.user) fitViewport();
-  if (S.user && !S.loaded) { S.loaded = true; await loadEntries(true); syncAll(); }
+  if (S.user && !S.loaded) { S.loaded = true; await loadOutbox(); await loadEntries(true); flushOutbox(); syncAll(); }
   if (!S.user) { S.loaded = false; S.entries.clear(); S.urls.clear(); renderFeed(); }
 }
 $("signinForm").addEventListener("submit", async e => {
@@ -93,12 +95,12 @@ $("signinForm").addEventListener("submit", async e => {
 $("signOutBtn").onclick = async () => {
   const b = $("signOutBtn");
   if (b.dataset.armed !== "1") {
-    b.dataset.armed = "1"; b.textContent = "Tap again to sign out";
-    setTimeout(() => { b.dataset.armed = ""; b.textContent = "Sign out"; }, 4000);
+    b.dataset.armed = "1"; b.querySelector(".sheet-title").textContent = "Tap again to sign out";
+    setTimeout(() => { b.dataset.armed = ""; b.querySelector(".sheet-title").textContent = "Sign out"; }, 4000);
     return;
   }
-  b.dataset.armed = ""; b.textContent = "Sign out";
-  await sb.auth.signOut(); resetComposer();
+  b.dataset.armed = ""; b.querySelector(".sheet-title").textContent = "Sign out";
+  closeSheet(); await sb.auth.signOut(); resetComposer();
 };
 sb.auth.onAuthStateChange((event, session) => {
   if (event === "SIGNED_IN" || event === "SIGNED_OUT" || event === "INITIAL_SESSION") setTimeout(() => showForSession(session), 0);
@@ -122,16 +124,17 @@ async function loadConnections() {
   const { data } = await sb.from("connections").select("provider, status, last_sync_at, last_error");
   const rows = data || [];
   const box = $("stravaConn"); box.replaceChildren();
-  const dot = () => h("span", { "aria-hidden": "true", text: "·" });
-  // Strava workouts arrive through the iPhone Shortcut (Apple Health)
+  const line = (label, right) => h("div", { class: "status-line" }, h("span", { text: label }), right);
   const ah = rows.find(r => r.provider === "apple_health");
-  if (ah) box.append(h("span", { class: "quiet", text: "Strava synced " + ago(ah.last_sync_at) }), dot());
+  box.append(line("Strava (iPhone shortcut)", h("span", { class: "muted", text: ah ? "synced " + ago(ah.last_sync_at) : "not synced yet" })));
   for (const [key, p] of Object.entries(PROVIDERS)) {
     const c = rows.find(r => r.provider === key);
-    if (!c) { if (p.alwaysShow) box.append(h("button", { type: "button", class: "quiet on", onclick: () => connect(key) }, "Connect " + p.name), dot()); continue; }
-    if (c.status === "needs_reconnect" || c.status === "error" && !c.last_sync_at)
-      box.append(h("button", { type: "button", class: "quiet warn", title: c.last_error || "", onclick: () => connect(key) }, "Reconnect " + p.name), dot());
-    else box.append(h("span", { class: "quiet", title: c.last_error || "", text: p.name + (c.last_error ? " sync problem · " : " synced ") + ago(c.last_sync_at) }), dot());
+    if (!c && !p.alwaysShow) continue;
+    const label = key === "google_health" ? "Fitbit (Google Health)" : p.name + " (direct)";
+    if (!c) box.append(line(label, h("button", { type: "button", class: "link", onclick: () => connect(key) }, "Connect")));
+    else if (c.status === "needs_reconnect" || c.status === "error" && !c.last_sync_at)
+      box.append(line(label, h("button", { type: "button", class: "link warn", title: c.last_error || "", onclick: () => connect(key) }, "Reconnect")));
+    else box.append(line(label, h("span", { class: c.last_error ? "warn" : "muted", title: c.last_error || "", text: (c.last_error ? "problem · " : "synced ") + ago(c.last_sync_at) })));
   }
 }
 async function connect(key) {
@@ -287,52 +290,190 @@ function startEdit(id) {
 
 $("composer").addEventListener("submit", async ev => {
   ev.preventDefault();
+  if (S.searching) return;
   const text = textEl.value.trim();
   if (!text && !S.draft.photos.length) { toast("Write something or add a photo first."); return; }
-  const btn = $("saveBtn"), wasEdit = !!S.editing;
+  if (!S.editing) { await queueNew(text); return; }
+
+  // Editing an existing entry needs a connection
+  const btn = $("saveBtn"), id = S.editing;
   btn.disabled = true; btn.classList.add("busy");
   try {
-    const newPhotos = S.draft.photos.filter(p => p.blob);
-    const row = {
-      ts: new Date(S.draft.whenMs ?? Date.now()).toISOString(),
-      tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
-      body: text || null,
-    };
-    let id = S.editing;
-    if (id) {
-      const { error } = await sb.from("entries").update(row).eq("id", id);
-      if (error) throw error;
-      const kept = new Set(S.draft.photos.filter(p => p.existing).map(p => p.existing.id));
-      const removed = (S.entries.get(id)?.entry_photos || []).filter(p => !kept.has(p.id));
-      if (removed.length) {
-        await sb.from("entry_photos").delete().in("id", removed.map(p => p.id));
-        await sb.storage.from(BUCKET).remove(removed.map(p => p.path));
-      }
-    } else {
-      const { data, error } = await sb.from("entries").insert(row).select("id").single();
-      if (error) throw error;
-      id = data.id;
+    const row = { ts: new Date(S.draft.whenMs ?? Date.now()).toISOString(), tz: Intl.DateTimeFormat().resolvedOptions().timeZone, body: text || null };
+    const { error } = await sb.from("entries").update(row).eq("id", id);
+    if (error) throw error;
+    const kept = new Set(S.draft.photos.filter(p => p.existing).map(p => p.existing.id));
+    const removed = (S.entries.get(id)?.entry_photos || []).filter(p => !kept.has(p.id));
+    if (removed.length) {
+      await sb.from("entry_photos").delete().in("id", removed.map(p => p.id));
+      await sb.storage.from(BUCKET).remove(removed.map(p => p.path));
     }
-    for (const p of newPhotos) {
+    for (const p of S.draft.photos.filter(p => p.blob)) {
       const path = `${S.user.id}/${id}/${uuid()}.jpg`;
       const up = await sb.storage.from(BUCKET).upload(path, p.blob, { contentType: "image/jpeg", upsert: false });
       if (up.error) throw up.error;
-      const { error } = await sb.from("entry_photos").insert({ entry_id: id, path, width: p.w, height: p.h });
-      if (error) throw error;
+      const { error: e2 } = await sb.from("entry_photos").insert({ entry_id: id, path, width: p.w, height: p.h });
+      if (e2) throw e2;
     }
     await reloadOne(id);
     S.lastAdded = id;
-    resetComposer();
-    renderFeed();
-    if (!wasEdit) toBottom();
-    toast(wasEdit ? "Saved" : "Logged");
+    resetComposer(); renderFeed(); toast("Saved");
   } catch (e) {
     console.error(e);
-    toast(/jwt|auth/i.test(e?.message || "") ? "You've been signed out. Sign in again and retry." : "Couldn't save. Check your connection and try again.");
+    toast(navigator.onLine === false ? "You're offline. Edits need a connection, so try again when you're back online." : "Couldn't save. Check your connection and try again.");
   } finally {
     btn.disabled = false; btn.classList.remove("busy");
   }
 });
+
+/* ---------- saving with no signal: everything new goes to an outbox on the phone first ---------- */
+const outbox = (() => {
+  let dbp;
+  const open = () => dbp || (dbp = new Promise((res, rej) => {
+    const r = indexedDB.open("timeline", 1);
+    r.onupgradeneeded = () => r.result.createObjectStore("outbox", { keyPath: "id" });
+    r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
+  }));
+  const run = async (mode, fn) => {
+    const db = await open();
+    return new Promise((res, rej) => {
+      const t = db.transaction("outbox", mode); const req = fn(t.objectStore("outbox"));
+      t.oncomplete = () => res(req ? req.result : undefined); t.onerror = () => rej(t.error);
+    });
+  };
+  return { put: o => run("readwrite", st => st.put(o)), del: id => run("readwrite", st => st.delete(id)), all: () => run("readonly", st => st.getAll()) };
+})();
+function pendingEntry(item) {
+  return { id: item.id, ts: item.row.ts, tz: item.row.tz, body: item.row.body, source: "me", details: {}, pending: true,
+    entry_photos: item.photos.map(p => ({ id: p.id, preview: p.preview || (p.preview = URL.createObjectURL(p.blob)) })) };
+}
+async function loadOutbox() {
+  try { for (const item of await outbox.all() || []) if (item.userId === S.user?.id) S.pending.set(item.id, item); } catch { /* storage unavailable */ }
+}
+async function queueNew(text) {
+  const id = uuid();
+  const item = {
+    id, userId: S.user.id, createdAt: Date.now(),
+    row: { id, ts: new Date(S.draft.whenMs ?? Date.now()).toISOString(), tz: Intl.DateTimeFormat().resolvedOptions().timeZone, body: text || null },
+    photos: S.draft.photos.filter(p => p.blob).map(p => ({ id: uuid(), blob: p.blob, w: p.w, h: p.h })),
+  };
+  try { await outbox.put({ ...item, photos: item.photos.map(({ preview, ...rest }) => rest) }); } catch { /* kept in memory for this session */ }
+  S.pending.set(id, item);
+  S.lastAdded = id;
+  resetComposer(); renderFeed(); toBottom();
+  flushOutbox(true);
+}
+const already = e => e && (e.code === "23505" || /duplicate|already exists/i.test(e.message || "") || e.statusCode === "409");
+async function sendItem(item) {
+  const { error } = await sb.from("entries").insert(item.row);
+  if (error && !already(error)) throw error;
+  for (const p of item.photos) {
+    const path = `${item.userId}/${item.id}/${p.id}.jpg`;
+    const up = await sb.storage.from(BUCKET).upload(path, p.blob, { contentType: "image/jpeg", upsert: false });
+    if (up.error && !already(up.error)) throw up.error;
+    const { error: e2 } = await sb.from("entry_photos").insert({ id: p.id, entry_id: item.id, path, width: p.w, height: p.h });
+    if (e2 && !already(e2)) throw e2;
+  }
+}
+async function flushOutbox(fresh) {
+  if (S.flushing || !S.user || !S.pending.size) return;
+  S.flushing = true;
+  let sent = 0, failed = false;
+  try {
+    for (const item of [...S.pending.values()].sort((a, b) => a.createdAt - b.createdAt)) {
+      try {
+        await sendItem(item);
+        try { await outbox.del(item.id); } catch { /* fine */ }
+        S.pending.delete(item.id);
+        for (const p of item.photos) if (p.preview) URL.revokeObjectURL(p.preview);
+        await reloadOne(item.id);
+        sent++;
+      } catch (e) { console.warn("still waiting to send", e); failed = true; break; }
+    }
+  } finally { S.flushing = false; }
+  renderFeed();
+  if (fresh) toast(failed ? "Saved on your phone. It'll send when you're back online." : "Logged");
+  else if (sent) toast(sent === 1 ? "Sent 1 saved entry" : `Sent ${sent} saved entries`);
+}
+window.addEventListener("online", () => flushOutbox());
+setInterval(() => { if (S.pending.size && navigator.onLine !== false) flushOutbox(); }, 30000);
+
+/* ---------- the ⋯ panel ---------- */
+function openSheet() { $("sheet").hidden = false; $("sheetBackdrop").hidden = false; loadConnections(); }
+function closeSheet() { $("sheet").hidden = true; $("sheetBackdrop").hidden = true; }
+$("moreMenuBtn").onclick = openSheet;
+$("sheetBackdrop").onclick = closeSheet;
+document.addEventListener("keydown", e => { if (e.key === "Escape" && !$("sheet").hidden) closeSheet(); });
+$("syncStravaBtn").onclick = () => {
+  closeSheet();
+  // Opens the Shortcuts app and runs the shortcut; swipe back to Timeline afterwards.
+  location.href = "shortcuts://run-shortcut?name=" + encodeURIComponent("Timeline Health");
+};
+
+/* ---------- search ---------- */
+$("searchBtn").onclick = () => { closeSheet(); enterSearch(); };
+function enterSearch() {
+  if (S.editing) resetComposer();
+  S.searching = true; S.searchQ = ""; S.searchResults = null;
+  $("logBar").hidden = true; $("thumbs").hidden = true; $("whenRow").hidden = true; $("editFlag").hidden = true;
+  $("searchBar").hidden = false; $("searchInput").value = "";
+  $("searchInput").focus(); renderFeed();
+}
+function exitSearch() {
+  S.searching = false; S.searchQ = ""; S.searchResults = null;
+  $("searchBar").hidden = true; $("logBar").hidden = false; renderThumbs();
+  renderFeed(); toBottom();
+}
+$("searchDone").onclick = exitSearch;
+let searchTimer;
+$("searchInput").addEventListener("input", e => {
+  clearTimeout(searchTimer);
+  const q = e.target.value.trim();
+  searchTimer = setTimeout(() => runSearch(q), 300);
+});
+async function runSearch(q) {
+  S.searchQ = q;
+  if (q.length < 2) { S.searchResults = null; renderFeed(); return; }
+  const like = "%" + q.replace(/[\\%_]/g, m => "\\" + m) + "%";
+  const { data, error } = await sb.from("entries").select(SELECT).ilike("body", like).order("ts", { ascending: false }).limit(200);
+  if (q !== S.searchQ || !S.searching) return;
+  if (error) { toast("Search didn't work. Check your connection."); return; }
+  S.searchResults = data || [];
+  await signPhotos(S.searchResults);
+  renderFeed(); toBottom();
+}
+function highlighted(text) {
+  const q = S.searching ? S.searchQ : "";
+  if (!q || q.length < 2 || !text) return document.createTextNode(text || "");
+  const frag = document.createDocumentFragment(), lower = text.toLowerCase(), ql = q.toLowerCase();
+  let i = 0, j;
+  while ((j = lower.indexOf(ql, i)) !== -1) {
+    frag.append(text.slice(i, j), h("mark", { text: text.slice(j, j + q.length) }));
+    i = j + q.length;
+  }
+  frag.append(text.slice(i));
+  return frag;
+}
+
+/* ---------- tap to log again, press and hold to edit ---------- */
+function pressable(el, onTap, onHold) {
+  let timer, held = false, sx = 0, sy = 0;
+  el.addEventListener("pointerdown", e => {
+    held = false; sx = e.clientX; sy = e.clientY;
+    timer = setTimeout(() => { held = true; if (navigator.vibrate) navigator.vibrate(10); onHold(); }, 500);
+  });
+  el.addEventListener("pointermove", e => { if (Math.abs(e.clientX - sx) > 8 || Math.abs(e.clientY - sy) > 8) clearTimeout(timer); });
+  for (const ev of ["pointerup", "pointercancel", "pointerleave"]) el.addEventListener(ev, () => clearTimeout(timer));
+  el.addEventListener("contextmenu", e => e.preventDefault());
+  el.addEventListener("click", e => { if (held) { e.preventDefault(); held = false; return; } onTap(); });
+}
+function logAgain(e) {
+  if (S.searching) exitSearch();
+  resetComposer();
+  textEl.value = e.body || "";
+  autoGrow(); textEl.focus();
+  toast("Copied to the log box. Edit it or tap the arrow to log it now.");
+}
 
 /* ---------- feed (oldest at top, newest at bottom) ---------- */
 function dayLabel(key) {
@@ -408,22 +549,24 @@ function renderEntry(e) {
   if (e.source === "google_health") { li.append(e.details?.kind === "day" ? dayBox(e) : sleepBox(e)); return li; }
   if (e.source && e.source !== "me") { li.append(h("div", { class: "box" }, boxHead((SOURCE_LABEL[e.source] || e.source).toUpperCase(), "", fmtTime(e.ts)), h("p", { class: "body", text: e.body || "" }))); return li; }
 
-  // your own entry: time · text · small photos on the right; tap to edit or delete
+  // your own entry: time · text · small photos on the right
+  // tap = log again, press and hold = edit / delete
   const photos = e.entry_photos || [];
-  const row = h("div", { class: "note" + (S.openId === e.id ? " open" : "") + (S.editing === e.id ? " editing" : "") });
-  const main = h("button", { type: "button", class: "note-main", "aria-expanded": String(S.openId === e.id),
-    onclick: () => { S.openId = S.openId === e.id ? null : e.id; S.confirmId = null; renderFeed(); } },
-    h("span", { class: "time", text: fmtTime(e.ts) }),
-    h("span", { class: "body", text: e.body || (photos.length ? "" : " ") }));
+  const row = h("div", { class: "note" + (S.openId === e.id ? " open" : "") + (S.editing === e.id ? " editing" : "") + (e.pending ? " pending" : "") });
+  const body = h("span", { class: "body" }); body.append(highlighted(e.body || ""));
+  const main = h("button", { type: "button", class: "note-main", "aria-label": e.pending ? undefined : "Log this again. Press and hold to edit or delete." },
+    h("span", { class: "time", text: fmtTime(e.ts) }), body);
+  if (!e.pending) pressable(main, () => logAgain(e), () => { S.openId = e.id; S.confirmId = null; renderFeed(); });
   row.append(main);
   if (photos.length) row.append(h("div", { class: "thumbs-r" }, photos.map(p => {
-    const u = S.urls.get(p.path)?.url;
+    const u = p.preview || S.urls.get(p.path)?.url;
     const img = u ? h("img", { src: u, alt: "", loading: "lazy" }) : null;
     if (img) img.addEventListener("load", () => { if (nearBottom()) toBottom(); }, { once: true });
     return h("button", { type: "button", class: "thumb-r", "aria-label": "Open photo", onclick: () => u && openPhoto(u) }, img);
   })));
   li.append(row);
-  if (S.openId === e.id) {
+  if (e.pending) li.append(h("div", { class: "pending-note", text: S.flushing ? "Sending…" : "Saved on your phone · waiting to send" }));
+  if (S.openId === e.id && !e.pending) {
     li.append(S.confirmId === e.id
       ? h("div", { class: "entry-tools" },
           h("span", { text: "Delete" + (photos.length ? " this and its photos?" : " this entry?") }),
@@ -431,7 +574,8 @@ function renderEntry(e) {
           h("button", { type: "button", onclick: () => { S.confirmId = null; renderFeed(); } }, "Keep"))
       : h("div", { class: "entry-tools" },
           h("button", { type: "button", onclick: () => startEdit(e.id) }, "Edit"),
-          h("button", { type: "button", class: "danger", onclick: () => { S.confirmId = e.id; renderFeed(); } }, "Delete")));
+          h("button", { type: "button", class: "danger", onclick: () => { S.confirmId = e.id; renderFeed(); } }, "Delete"),
+          h("button", { type: "button", onclick: () => { S.openId = null; renderFeed(); } }, "Done")));
   }
   return li;
 }
@@ -447,9 +591,21 @@ async function del(e) {
 }
 function renderFeed() {
   const feed = $("feed");
-  const list = [...S.entries.values()].sort((a, b) => ms(a.ts) - ms(b.ts));
   feed.replaceChildren();
-  if (!list.length) {
+  let list;
+  if (S.searching) {
+    if (!S.searchResults) {
+      feed.append(h("div", { class: "empty" }, h("strong", { text: "Search your log" }), "Type at least two letters to find every entry that mentions them."));
+      $("moreBtn").hidden = true;
+      return;
+    }
+    list = [...S.searchResults].sort((a, b) => ms(a.ts) - ms(b.ts));
+    feed.append(h("div", { class: "search-count", text: list.length ? `${list.length}${list.length === 200 ? "+" : ""} ${list.length === 1 ? "entry mentions" : "entries mention"} “${S.searchQ}”` : `Nothing mentions “${S.searchQ}”` }));
+  } else {
+    list = [...S.entries.values(), ...[...S.pending.values()].filter(it => !S.entries.has(it.id)).map(pendingEntry)]
+      .sort((a, b) => ms(a.ts) - ms(b.ts));
+  }
+  if (!list.length && !S.searching) {
     if (S.loading) feed.append(h("div", { class: "empty" }, "Loading your log…"));
     else if (S.user) feed.append(h("div", { class: "empty" }, h("strong", { text: "Nothing logged yet" }), "Type anything below or add a photo, then tap the arrow. The time is stamped for you."));
   } else {
@@ -464,7 +620,7 @@ function renderFeed() {
       box.append(renderEntry(e));
     }
   }
-  $("moreBtn").hidden = !S.hasMore || S.loading;
+  $("moreBtn").hidden = S.searching || !S.hasMore || S.loading;
   S.lastAdded = null;
 }
 function openPhoto(url) { $("lightImg").src = url; $("lightbox").hidden = false; }
@@ -473,7 +629,7 @@ document.addEventListener("keydown", e => { if (e.key === "Escape") $("lightbox"
 
 /* refresh when the app comes back to the foreground */
 document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "visible" && S.user && !S.loading && !S.editing) { loadEntries(true); syncAll(); }
+  if (document.visibilityState === "visible" && S.user && !S.loading && !S.editing && !S.searching) { flushOutbox(); loadEntries(true); syncAll(); }
 });
 
 /* ---------- boot ---------- */

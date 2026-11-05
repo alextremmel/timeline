@@ -1,5 +1,6 @@
 "use strict";
-/* Timeline of Me — a private, time-stamped personal log backed by Supabase. */
+/* Timeline of Me — a private, time-stamped personal log backed by Supabase.
+   Chat-style: newest entries at the bottom, older ones further up, log box pinned below. */
 
 const PAGE = 60;
 const BUCKET = "photos";
@@ -22,7 +23,7 @@ const ms = ts => new Date(ts).getTime();
 const dayKey = t => { const d = new Date(t); return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()); };
 const fmtTime = t => new Date(t).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 const toLocalInput = t => { const d = new Date(t); return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()) + "T" + pad(d.getHours()) + ":" + pad(d.getMinutes()); };
-function toast(msg) { const t = $("toast"); t.textContent = msg; t.hidden = false; clearTimeout(toast._t); toast._t = setTimeout(() => t.hidden = true, 2800); }
+function toast(msg) { const t = $("toast"); t.textContent = msg; t.hidden = false; clearTimeout(toast._t); toast._t = setTimeout(() => t.hidden = true, 2600); }
 function uuid() { return crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2); }
 
 /* ---------- supabase ---------- */
@@ -40,11 +41,40 @@ const S = {
 const freshDraft = () => ({ photos: [], whenMs: null });
 S.draft = freshDraft();
 
+/* ---------- scrolling + keyboard ---------- */
+const scroller = $("scroller");
+const shell = $("appView");
+const nearBottom = () => scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 80;
+const toBottom = () => { scroller.scrollTop = scroller.scrollHeight; };
+
+// Keep the app exactly the size of the visible screen so the log box sits right above the keyboard.
+function fitViewport() {
+  const vv = window.visualViewport;
+  const stick = nearBottom();
+  const hgt = vv ? vv.height : window.innerHeight;
+  shell.style.height = hgt + "px";
+  shell.style.top = (vv ? vv.offsetTop : 0) + "px";
+  document.body.classList.toggle("kb", !!vv && window.innerHeight - vv.height > 120);
+  if (stick) toBottom();
+}
+if (window.visualViewport) {
+  visualViewport.addEventListener("resize", fitViewport);
+  visualViewport.addEventListener("scroll", fitViewport);
+}
+window.addEventListener("resize", fitViewport);
+
+// Load older entries when scrolled near the top.
+scroller.addEventListener("scroll", () => {
+  if (scroller.scrollTop < 300 && S.hasMore && !S.loading && S.user) loadEntries(false);
+}, { passive: true });
+
 /* ---------- auth ---------- */
 async function showForSession(session) {
   S.user = session?.user || null;
   $("signinView").hidden = !!S.user;
-  $("appView").hidden = !S.user;
+  shell.hidden = !S.user;
+  document.body.classList.toggle("app-on", !!S.user);
+  if (S.user) fitViewport();
   if (S.user && !S.loaded) { S.loaded = true; await loadEntries(true); }
   if (!S.user) { S.loaded = false; S.entries.clear(); S.urls.clear(); renderFeed(); }
 }
@@ -79,8 +109,8 @@ const SELECT = "id, ts, tz, body, source, source_id, details, created_at, entry_
 async function loadEntries(reset) {
   if (S.loading) return;
   S.loading = true;
-  if (reset) { S.oldestTs = null; }
-  renderFeed();
+  if (reset) S.oldestTs = null;
+  if (!S.entries.size) renderFeed();
   let q = sb.from("entries").select(SELECT).order("ts", { ascending: false }).limit(PAGE);
   if (!reset && S.oldestTs) q = q.lt("ts", S.oldestTs);
   const { data, error } = await q;
@@ -92,7 +122,13 @@ async function loadEntries(reset) {
   if (data.length) S.oldestTs = data[data.length - 1].ts;
   S.hasMore = data.length === PAGE;
   await signPhotos([...S.entries.values()]);
-  renderFeed();
+  if (reset) { renderFeed(); toBottom(); }
+  else {
+    // keep the entry you were looking at in place while older ones appear above it
+    const before = scroller.scrollHeight - scroller.scrollTop;
+    renderFeed();
+    scroller.scrollTop = scroller.scrollHeight - before;
+  }
 }
 async function reloadOne(id) {
   const { data, error } = await sb.from("entries").select(SELECT).eq("id", id).maybeSingle();
@@ -115,8 +151,14 @@ $("moreBtn").onclick = () => loadEntries(false);
 
 /* ---------- composer ---------- */
 const textEl = $("text");
-function autoGrow() { textEl.style.height = "auto"; textEl.style.height = Math.max(96, textEl.scrollHeight) + "px"; }
+function autoGrow() {
+  const stick = nearBottom();
+  textEl.style.height = "auto";
+  textEl.style.height = textEl.scrollHeight + 2 + "px";
+  if (stick) toBottom();
+}
 textEl.addEventListener("input", autoGrow);
+textEl.addEventListener("focus", () => setTimeout(() => { fitViewport(); toBottom(); }, 300));
 
 function renderThumbs() {
   const box = $("thumbs"); box.replaceChildren(); box.hidden = !S.draft.photos.length;
@@ -126,15 +168,14 @@ function renderThumbs() {
 }
 function renderWhen() {
   const changed = S.draft.whenMs != null;
-  $("whenLabel").textContent = changed
-    ? new Date(S.draft.whenMs).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })
-    : "Now";
   $("whenBtn").classList.toggle("changed", changed);
+  $("whenBtn").setAttribute("aria-label", changed ? "Time: " + new Date(S.draft.whenMs).toLocaleString() : "Change time (now)");
+  if (changed) { $("whenRow").hidden = false; $("whenInput").value = toLocalInput(S.draft.whenMs); }
 }
 $("whenBtn").onclick = () => {
   const row = $("whenRow");
-  row.hidden = !row.hidden;
-  if (!row.hidden) { $("whenInput").value = toLocalInput(S.draft.whenMs ?? Date.now()); $("whenInput").focus(); }
+  if (row.hidden) { row.hidden = false; $("whenInput").value = toLocalInput(S.draft.whenMs ?? Date.now()); $("whenInput").focus(); }
+  else if (S.draft.whenMs == null) row.hidden = true;
 };
 $("whenInput").addEventListener("change", e => { const v = e.target.value; S.draft.whenMs = v ? new Date(v).getTime() : null; renderWhen(); });
 $("whenNow").onclick = () => { S.draft.whenMs = null; $("whenRow").hidden = true; renderWhen(); };
@@ -159,7 +200,7 @@ $("photoInput").addEventListener("change", async e => {
 
 function resetComposer() {
   for (const p of S.draft.photos) if (p.blob) URL.revokeObjectURL(p.preview);
-  S.draft = freshDraft(); S.editing = null; textEl.value = ""; autoGrow(); $("whenRow").hidden = true;
+  S.draft = freshDraft(); S.editing = null; textEl.value = ""; textEl.style.height = ""; $("whenRow").hidden = true;
   $("editFlag").hidden = true; $("composer").classList.remove("editing"); $("saveBtn").textContent = "Log";
   renderThumbs(); renderWhen();
 }
@@ -168,12 +209,12 @@ $("cancelEdit").onclick = resetComposer;
 function startEdit(id) {
   const e = S.entries.get(id); if (!e) return;
   resetComposer(); S.editing = id; S.openId = null;
-  textEl.value = e.body || ""; autoGrow();
+  textEl.value = e.body || "";
   S.draft.photos = (e.entry_photos || []).map(p => ({ existing: p, preview: S.urls.get(p.path)?.url || "" }));
   S.draft.whenMs = ms(e.ts);
   $("editFlag").hidden = false; $("composer").classList.add("editing"); $("saveBtn").textContent = "Save";
   renderThumbs(); renderWhen(); renderFeed();
-  window.scrollTo({ top: 0, behavior: "smooth" }); textEl.focus();
+  textEl.focus(); autoGrow();
 }
 
 $("composer").addEventListener("submit", async ev => {
@@ -181,7 +222,7 @@ $("composer").addEventListener("submit", async ev => {
   const text = textEl.value.trim();
   if (!text && !S.draft.photos.length) { toast("Write something or add a photo first."); return; }
   const btn = $("saveBtn"), label = btn.textContent;
-  btn.disabled = true; btn.textContent = "Saving…";
+  btn.disabled = true; btn.textContent = "…";
   try {
     const newPhotos = S.draft.photos.filter(p => p.blob);
     const row = {
@@ -211,22 +252,24 @@ $("composer").addEventListener("submit", async ev => {
       const { error } = await sb.from("entry_photos").insert({ entry_id: id, path, width: p.w, height: p.h });
       if (error) throw error;
     }
+    const wasEdit = label === "Save";
     await reloadOne(id);
     S.lastAdded = id;
     resetComposer();
     renderFeed();
-    toast(label === "Save" ? "Saved" : "Logged");
+    if (!wasEdit) toBottom();
+    toast(wasEdit ? "Saved" : "Logged");
   } catch (e) {
     console.error(e);
     toast(/jwt|auth/i.test(e?.message || "") ? "You've been signed out. Sign in again and retry." : "Couldn't save. Check your connection and try again.");
     btn.textContent = label;
   } finally {
     btn.disabled = false;
-    if (btn.textContent === "Saving…") btn.textContent = label;
+    if (btn.textContent === "…") btn.textContent = label;
   }
 });
 
-/* ---------- feed ---------- */
+/* ---------- feed (oldest at top, newest at bottom) ---------- */
 function dayLabel(key) {
   const today = dayKey(Date.now()), yest = dayKey(Date.now() - 864e5);
   if (key === today) return "Today";
@@ -249,7 +292,9 @@ function renderEntry(e) {
   const photos = e.entry_photos || [];
   if (photos.length) li.append(h("div", { class: "pics" }, photos.map(p => {
     const u = S.urls.get(p.path)?.url;
-    return h("button", { type: "button", "aria-label": "Open photo", onclick: () => u && openPhoto(u) }, u ? h("img", { src: u, alt: "", loading: "lazy" }) : null);
+    const img = u ? h("img", { src: u, alt: "", loading: "lazy" }) : null;
+    if (img) img.addEventListener("load", () => { if (nearBottom()) toBottom(); }, { once: true });
+    return h("button", { type: "button", "aria-label": "Open photo", onclick: () => u && openPhoto(u) }, img);
   })));
   if (mine && S.openId === e.id) {
     if (S.confirmId === e.id) {
@@ -277,11 +322,11 @@ async function del(e) {
 }
 function renderFeed() {
   const feed = $("feed");
-  const list = [...S.entries.values()].sort((a, b) => ms(b.ts) - ms(a.ts));
+  const list = [...S.entries.values()].sort((a, b) => ms(a.ts) - ms(b.ts));
   feed.replaceChildren();
   if (!list.length) {
     if (S.loading) feed.append(h("div", { class: "empty" }, "Loading your log…"));
-    else if (S.user) feed.append(h("div", { class: "empty" }, h("strong", { text: "Nothing logged yet" }), "Type anything or add a photo, then tap Log. The time is stamped for you."));
+    else if (S.user) feed.append(h("div", { class: "empty" }, h("strong", { text: "Nothing logged yet" }), "Type anything below or add a photo, then tap Log. The time is stamped for you."));
   } else {
     let curDay = null, ul;
     for (const e of list) {

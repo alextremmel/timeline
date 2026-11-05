@@ -75,7 +75,7 @@ async function showForSession(session) {
   shell.hidden = !S.user;
   document.body.classList.toggle("app-on", !!S.user);
   if (S.user) fitViewport();
-  if (S.user && !S.loaded) { S.loaded = true; await loadEntries(true); loadConnections(); syncStrava(); }
+  if (S.user && !S.loaded) { S.loaded = true; await loadEntries(true); loadConnections(); }
   if (!S.user) { S.loaded = false; S.entries.clear(); S.urls.clear(); renderFeed(); }
 }
 $("signinForm").addEventListener("submit", async e => {
@@ -105,7 +105,7 @@ sb.auth.onAuthStateChange((event, session) => {
 });
 
 /* ---------- outside connections (Strava) ---------- */
-const SOURCE_LABEL = { strava: "Strava", google_health: "Google Health" };
+const SOURCE_LABEL = { strava: "Strava", google_health: "Google Health", apple_health: "Apple Health" };
 function ago(ts) {
   if (!ts) return "not yet";
   const m = Math.round((Date.now() - ms(ts)) / 60000);
@@ -116,12 +116,17 @@ function ago(ts) {
 }
 async function loadConnections() {
   const { data } = await sb.from("connections").select("provider, status, last_sync_at, last_error");
-  const c = (data || []).find(r => r.provider === "strava");
   const box = $("stravaConn"); box.replaceChildren();
-  if (!c) box.append(h("button", { type: "button", class: "quiet on", onclick: connectStrava }, "Connect Strava"));
-  else if (c.status === "needs_reconnect") box.append(h("button", { type: "button", class: "quiet warn", onclick: connectStrava }, "Reconnect Strava"));
-  else box.append(h("span", { class: "quiet", title: c.last_error || "", text: (c.last_error ? "Strava sync problem · " : "Strava synced ") + ago(c.last_sync_at) }));
-  box.append(h("span", { "aria-hidden": "true", text: "·" }));
+  // Apple Health (via the iPhone Shortcut): show when data last arrived
+  const ah = (data || []).find(r => r.provider === "apple_health");
+  if (ah) box.append(h("span", { class: "quiet", text: "Apple Health synced " + ago(ah.last_sync_at) }), h("span", { "aria-hidden": "true", text: "·" }));
+  // Strava direct sync (only shown if it was ever connected; needs a Strava subscription)
+  const c = (data || []).find(r => r.provider === "strava");
+  if (c) {
+    if (c.status === "needs_reconnect") box.append(h("button", { type: "button", class: "quiet warn", onclick: connectStrava }, "Reconnect Strava"));
+    else box.append(h("span", { class: "quiet", text: (c.last_error ? "Strava sync problem · " : "Strava synced ") + ago(c.last_sync_at) }));
+    box.append(h("span", { "aria-hidden": "true", text: "·" }));
+  }
 }
 async function connectStrava() {
   const { data, error } = await sb.functions.invoke("strava-start", { body: {} });
@@ -396,7 +401,7 @@ document.addEventListener("keydown", e => { if (e.key === "Escape") $("lightbox"
 
 /* refresh when the app comes back to the foreground */
 document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "visible" && S.user && !S.loading && !S.editing) { loadEntries(true); syncStrava(); }
+  if (document.visibilityState === "visible" && S.user && !S.loading && !S.editing) { loadEntries(true); loadConnections(); }
 });
 
 /* ---------- boot ---------- */

@@ -20,6 +20,12 @@ A private, time-stamped personal log: free-text notes and photos in one feed, bu
 - `supabase/functions/strava-sync` — imports activities into `entries` with `source = 'strava'`; runs hourly (pg_cron job `strava-sync-hourly`) and when the app opens
 - Needs Edge Function secrets `STRAVA_CLIENT_ID` and `STRAVA_CLIENT_SECRET`
 
+## Apple Health (via iPhone Shortcut)
+
+- `supabase/functions/health-ingest` — receives POSTs from an iPhone Shortcut (header `x-timeline-key`; only its hash is stored in `ingest_keys`), stores each delivery in `health_raw`
+- Workouts recorded by Strava and Fitbit reach Apple Health, so both arrive this way
+- The direct Strava functions remain for later but are unscheduled (Strava's API needs a paid subscription)
+
 ## Files
 
 - `index.html`, `styles.css`, `app.js` — the app

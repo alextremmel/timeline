@@ -75,7 +75,7 @@ async function showForSession(session) {
   shell.hidden = !S.user;
   document.body.classList.toggle("app-on", !!S.user);
   if (S.user) fitViewport();
-  if (S.user && !S.loaded) { S.loaded = true; await loadEntries(true); syncAll(); }
+  if (S.user && !S.loaded) { S.loaded = true; await loadEntries(true); loadLive(); syncAll(); }
   if (!S.user) { S.loaded = false; S.entries.clear(); S.urls.clear(); renderFeed(); }
 }
 $("signinForm").addEventListener("submit", async e => {
@@ -150,6 +150,7 @@ async function syncAll() {
     } catch { /* the hourly sync will catch up */ }
   }));
   if (changed) await loadEntries(true);
+  loadLive();
   loadConnections();
 }
 (function handleReturn() {
@@ -269,10 +270,10 @@ $("photoInput").addEventListener("change", async e => {
 function resetComposer() {
   for (const p of S.draft.photos) if (p.blob) URL.revokeObjectURL(p.preview);
   S.draft = freshDraft(); S.editing = null; textEl.value = ""; textEl.style.height = ""; $("whenRow").hidden = true;
-  $("editFlag").hidden = true; $("composer").classList.remove("editing"); $("saveBtn").textContent = "Log";
+  $("editFlag").hidden = true; $("composer").classList.remove("editing"); $("saveBtn").setAttribute("aria-label", "Log entry");
   renderThumbs(); renderWhen();
 }
-$("cancelEdit").onclick = resetComposer;
+$("cancelEdit").onclick = () => { resetComposer(); renderFeed(); };
 
 function startEdit(id) {
   const e = S.entries.get(id); if (!e) return;
@@ -280,7 +281,7 @@ function startEdit(id) {
   textEl.value = e.body || "";
   S.draft.photos = (e.entry_photos || []).map(p => ({ existing: p, preview: S.urls.get(p.path)?.url || "" }));
   S.draft.whenMs = ms(e.ts);
-  $("editFlag").hidden = false; $("composer").classList.add("editing"); $("saveBtn").textContent = "Save";
+  $("editFlag").hidden = false; $("composer").classList.add("editing"); $("saveBtn").setAttribute("aria-label", "Save changes");
   renderThumbs(); renderWhen(); renderFeed();
   textEl.focus(); autoGrow();
 }
@@ -289,8 +290,8 @@ $("composer").addEventListener("submit", async ev => {
   ev.preventDefault();
   const text = textEl.value.trim();
   if (!text && !S.draft.photos.length) { toast("Write something or add a photo first."); return; }
-  const btn = $("saveBtn"), label = btn.textContent;
-  btn.disabled = true; btn.textContent = "…";
+  const btn = $("saveBtn"), wasEdit = !!S.editing;
+  btn.disabled = true; btn.classList.add("busy");
   try {
     const newPhotos = S.draft.photos.filter(p => p.blob);
     const row = {
@@ -320,7 +321,6 @@ $("composer").addEventListener("submit", async ev => {
       const { error } = await sb.from("entry_photos").insert({ entry_id: id, path, width: p.w, height: p.h });
       if (error) throw error;
     }
-    const wasEdit = label === "Save";
     await reloadOne(id);
     S.lastAdded = id;
     resetComposer();
@@ -330,51 +330,109 @@ $("composer").addEventListener("submit", async ev => {
   } catch (e) {
     console.error(e);
     toast(/jwt|auth/i.test(e?.message || "") ? "You've been signed out. Sign in again and retry." : "Couldn't save. Check your connection and try again.");
-    btn.textContent = label;
   } finally {
-    btn.disabled = false;
-    if (btn.textContent === "…") btn.textContent = label;
+    btn.disabled = false; btn.classList.remove("busy");
   }
 });
 
 /* ---------- feed (oldest at top, newest at bottom) ---------- */
 function dayLabel(key) {
   const today = dayKey(Date.now()), yest = dayKey(Date.now() - 864e5);
-  if (key === today) return "Today";
-  if (key === yest) return "Yesterday";
   const [y, m, d] = key.split("-").map(Number);
-  return new Date(y, m - 1, d).toLocaleDateString([], { weekday: "long", month: "long", day: "numeric", year: y === new Date().getFullYear() ? undefined : "numeric" });
+  const date = new Date(y, m - 1, d);
+  const short = date.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric", year: y === new Date().getFullYear() ? undefined : "numeric" });
+  if (key === today) return "Today · " + short;
+  if (key === yest) return "Yesterday · " + short;
+  return short;
+}
+const STAGE_COLOR = { AWAKE: "var(--st-awake)", REM: "var(--st-rem)", LIGHT: "var(--st-light)", DEEP: "var(--st-deep)" };
+function clock(sec) {
+  const s = Math.round(sec || 0), hh = Math.floor(s / 3600), mm = Math.floor((s % 3600) / 60), ss = s % 60;
+  return hh ? `${hh}:${pad(mm)}:${pad(ss)}` : `${mm}:${pad(ss)}`;
+}
+function hmText(min) { min = Math.round(min || 0); const hh = Math.floor(min / 60), mm = min % 60; return hh ? `${hh}h ${pad(mm)}m` : `${mm}m`; }
+const num = n => Number(n).toLocaleString("en-US");
+function boxHead(label, title, right) {
+  return h("div", { class: "box-head" },
+    h("span", { class: "box-label", text: label }),
+    h("span", { class: "box-title", text: title }),
+    right ? h("span", { class: "box-right", text: right }) : null);
+}
+function stat(value, unit) {
+  return h("span", { class: "stat" }, h("b", { text: value }), unit ? h("span", { class: "unit", text: unit }) : null);
+}
+function stravaBox(e) {
+  const d = e.details || {};
+  const box = h("div", { class: "box strava" });
+  if (d.distance_mi == null) { box.append(boxHead("STRAVA", "Activity", fmtTime(e.ts)), h("p", { class: "body", text: e.body || "" })); return box; }
+  const kind = d.kind || "Activity";
+  const range = d.end ? `${fmtTime(d.start || e.ts)} – ${fmtTime(d.end)}` : fmtTime(e.ts);
+  const miles = Number(d.distance_mi), secs = Number(d.duration_s || 0);
+  const stats = h("div", { class: "stats" }, stat(miles < 10 ? miles.toFixed(2) : miles.toFixed(1), "mi"), stat(clock(secs)));
+  if (miles >= 0.1 && secs > 0) stats.append(kind === "Bike" ? stat((miles / (secs / 3600)).toFixed(1), "mph") : stat(clock(secs / miles), "/mi"));
+  box.append(boxHead("STRAVA", kind, range), stats);
+  return box;
+}
+function sleepBox(e) {
+  const d = e.details || {};
+  const start = d.start || e.ts, end = d.end || e.ts;
+  const box = h("div", { class: "box fitbit" },
+    boxHead("FITBIT", d.kind === "nap" ? "Nap" : "Sleep", `${fmtTime(start)} – ${fmtTime(end)}`));
+  box.querySelector(".box-head").append(h("span", { class: "box-big", text: hmText(d.minutes_asleep) }));
+  const t0 = ms(start), span = Math.max(1, ms(end) - t0);
+  if (Array.isArray(d.stages) && d.stages.length) {
+    const strip = h("div", { class: "stages", role: "img", "aria-label": "Sleep stages through the night" });
+    for (const [type, a, b] of d.stages) {
+      const left = (ms(a) - t0) / span * 100, width = Math.max(0.35, (ms(b) - ms(a)) / span * 100);
+      strip.append(h("span", { style: `left:${left.toFixed(2)}%;width:${width.toFixed(2)}%;background:${STAGE_COLOR[type] || "var(--line)"}` }));
+    }
+    box.append(strip);
+  }
+  const hrv = d.hrv?.averageHeartRateVariabilityMilliseconds;
+  if (d.resting_hr != null || hrv != null) {
+    box.append(h("div", { class: "vitals" },
+      d.resting_hr != null ? stat(String(d.resting_hr), "resting HR") : null,
+      hrv != null ? stat(Math.round(hrv) + " ms", "HRV") : null));
+  }
+  return box;
+}
+function dayBox(e) {
+  const d = e.details || {};
+  const stats = h("div", { class: "stats" });
+  if (d.steps != null) stats.append(stat(num(d.steps), "steps"));
+  if (d.active_kcal != null) stats.append(stat(num(d.active_kcal), "active cal"));
+  return h("div", { class: "box fitbit" }, boxHead("FITBIT", "Day total", fmtTime(e.ts)), stats);
 }
 function renderEntry(e) {
-  const mine = !e.source || e.source === "me";
-  const li = h("li", { class: "entry" + (S.lastAdded === e.id ? " new" : "") });
-  const head = h("div", { class: "entry-head" },
-    h("span", { class: "time", text: fmtTime(e.ts) }),
-    !mine ? h("span", { class: "src", text: SOURCE_LABEL[e.source] || e.source }) : null);
-  const main = mine
-    ? h("button", { type: "button", class: "entry-main", "aria-expanded": String(S.openId === e.id),
-        onclick: () => { S.openId = S.openId === e.id ? null : e.id; S.confirmId = null; renderFeed(); } }, head)
-    : h("div", null, head);
-  if (e.body) main.append(h("p", { class: "body", text: e.body }));
-  li.append(main);
+  const li = h("div", { class: "item" + (S.lastAdded === e.id ? " new" : "") });
+  if (e.source === "strava") { li.append(stravaBox(e)); return li; }
+  if (e.source === "google_health") { li.append(e.details?.kind === "day" ? dayBox(e) : sleepBox(e)); return li; }
+  if (e.source && e.source !== "me") { li.append(h("div", { class: "box" }, boxHead((SOURCE_LABEL[e.source] || e.source).toUpperCase(), "", fmtTime(e.ts)), h("p", { class: "body", text: e.body || "" }))); return li; }
+
+  // your own entry: time · text · small photos on the right; tap to edit or delete
   const photos = e.entry_photos || [];
-  if (photos.length) li.append(h("div", { class: "pics" }, photos.map(p => {
+  const row = h("div", { class: "note" + (S.openId === e.id ? " open" : "") + (S.editing === e.id ? " editing" : "") });
+  const main = h("button", { type: "button", class: "note-main", "aria-expanded": String(S.openId === e.id),
+    onclick: () => { S.openId = S.openId === e.id ? null : e.id; S.confirmId = null; renderFeed(); } },
+    h("span", { class: "time", text: fmtTime(e.ts) }),
+    h("span", { class: "body", text: e.body || (photos.length ? "" : " ") }));
+  row.append(main);
+  if (photos.length) row.append(h("div", { class: "thumbs-r" }, photos.map(p => {
     const u = S.urls.get(p.path)?.url;
     const img = u ? h("img", { src: u, alt: "", loading: "lazy" }) : null;
     if (img) img.addEventListener("load", () => { if (nearBottom()) toBottom(); }, { once: true });
-    return h("button", { type: "button", "aria-label": "Open photo", onclick: () => u && openPhoto(u) }, img);
+    return h("button", { type: "button", class: "thumb-r", "aria-label": "Open photo", onclick: () => u && openPhoto(u) }, img);
   })));
-  if (mine && S.openId === e.id) {
-    if (S.confirmId === e.id) {
-      li.append(h("div", { class: "entry-tools" },
-        h("span", { text: "Delete" + (photos.length ? " this and its photos?" : " this entry?") }),
-        h("button", { type: "button", class: "yes", onclick: () => del(e) }, "Delete"),
-        h("button", { type: "button", onclick: () => { S.confirmId = null; renderFeed(); } }, "Keep")));
-    } else {
-      li.append(h("div", { class: "entry-tools" },
-        h("button", { type: "button", onclick: () => startEdit(e.id) }, "Edit"),
-        h("button", { type: "button", class: "danger", onclick: () => { S.confirmId = e.id; renderFeed(); } }, "Delete")));
-    }
+  li.append(row);
+  if (S.openId === e.id) {
+    li.append(S.confirmId === e.id
+      ? h("div", { class: "entry-tools" },
+          h("span", { text: "Delete" + (photos.length ? " this and its photos?" : " this entry?") }),
+          h("button", { type: "button", class: "yes", onclick: () => del(e) }, "Delete"),
+          h("button", { type: "button", onclick: () => { S.confirmId = null; renderFeed(); } }, "Keep"))
+      : h("div", { class: "entry-tools" },
+          h("button", { type: "button", onclick: () => startEdit(e.id) }, "Edit"),
+          h("button", { type: "button", class: "danger", onclick: () => { S.confirmId = e.id; renderFeed(); } }, "Delete")));
   }
   return li;
 }
@@ -388,23 +446,47 @@ async function del(e) {
   if (S.editing === e.id) resetComposer();
   renderFeed(); toast("Deleted");
 }
+async function loadLive() {
+  const { data } = await sb.from("live_today").select("local_date, steps, active_kcal, updated_at").maybeSingle();
+  S.live = data || null;
+  renderFeed();
+}
+function livePill() {
+  const L = S.live;
+  if (!L || L.local_date !== dayKey(Date.now())) return null;
+  const doneToday = [...S.entries.values()].some(e => e.details?.kind === "day" && e.details?.date === L.local_date);
+  if (doneToday || (L.steps == null && L.active_kcal == null)) return null;
+  return h("div", { class: "live", title: "Updated " + fmtTime(L.updated_at) },
+    h("span", { class: "dot", "aria-hidden": "true" }),
+    h("span", { class: "muted", text: "Today so far" }),
+    L.steps != null ? stat(num(L.steps), "steps") : null,
+    L.active_kcal != null ? stat(num(L.active_kcal), "cal") : null);
+}
 function renderFeed() {
   const feed = $("feed");
   const list = [...S.entries.values()].sort((a, b) => ms(a.ts) - ms(b.ts));
   feed.replaceChildren();
   if (!list.length) {
     if (S.loading) feed.append(h("div", { class: "empty" }, "Loading your log…"));
-    else if (S.user) feed.append(h("div", { class: "empty" }, h("strong", { text: "Nothing logged yet" }), "Type anything below or add a photo, then tap Log. The time is stamped for you."));
+    else if (S.user) feed.append(h("div", { class: "empty" }, h("strong", { text: "Nothing logged yet" }), "Type anything below or add a photo, then tap the arrow. The time is stamped for you."));
   } else {
-    let curDay = null, ul;
+    let curDay = null, box;
     for (const e of list) {
       const k = dayKey(e.ts);
       if (k !== curDay) {
         curDay = k;
         const sec = h("section", { class: "day" }, h("h2", { text: dayLabel(k) }));
-        ul = h("ul", { class: "entries" }); sec.append(ul); feed.append(sec);
+        box = h("div", { class: "items" }); sec.append(box); feed.append(sec);
       }
-      ul.append(renderEntry(e));
+      box.append(renderEntry(e));
+    }
+    const pill = livePill();
+    if (pill) {
+      if (curDay !== dayKey(Date.now())) {
+        const sec = h("section", { class: "day" }, h("h2", { text: dayLabel(dayKey(Date.now())) }));
+        box = h("div", { class: "items" }); sec.append(box); feed.append(sec);
+      }
+      box.append(pill);
     }
   }
   $("moreBtn").hidden = !S.hasMore || S.loading;

@@ -190,6 +190,16 @@ async function buildEntries(admin: any, userId: string) {
     });
   }
 
+  // Today's running totals for the "Today so far" display
+  const live = days.get(today);
+  if (live) {
+    await admin.from("live_today").upsert({
+      user_id: userId, local_date: today,
+      steps: live.steps ?? null, active_kcal: live.activeCal != null ? Math.round(live.activeCal) : null,
+      updated_at: new Date().toISOString(),
+    });
+  }
+
   for (let i = 0; i < rows.length; i += 200) {
     const { error } = await admin.from("entries").upsert(rows.slice(i, i + 200), { onConflict: "user_id,source,source_id" });
     if (error) throw new Error("saving entries failed: " + error.message);

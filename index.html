@@ -49,7 +49,7 @@
 
   <form class="composer" id="composer" autocomplete="off">
     <div class="col composer-col">
-      <div class="edit-flag" id="editFlag" hidden><span>Editing an entry</span><button type="button" class="link" id="cancelEdit">Cancel</button></div>
+      <div class="edit-flag" id="editFlag" hidden><span>Editing your entry</span><button type="button" class="link" id="cancelEdit">Cancel</button></div>
       <div class="thumbs" id="thumbs" hidden></div>
       <div class="when-row" id="whenRow" hidden>
         <span class="when-label">Time</span>
@@ -65,7 +65,9 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>
         </button>
         <textarea id="text" rows="1" placeholder="What's happening?" aria-label="Entry text"></textarea>
-        <button type="submit" class="save" id="saveBtn">Log</button>
+        <button type="submit" class="send" id="saveBtn" aria-label="Log entry">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5"/><path d="M6 11l6-6 6 6"/></svg>
+        </button>
       </div>
     </div>
   </form>

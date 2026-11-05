@@ -1,7 +1,9 @@
 // Receives Apple Health data sent by the iPhone Shortcut.
 // The Shortcut proves who it is with a private key in the "x-timeline-key" header.
-// Every delivery is stored as-is in health_raw; turning it into timeline entries
-// happens in process() (added once the delivery format is confirmed).
+// Every delivery is stored as-is in health_raw, then turned into timeline entries.
+//
+// Delivery format (JSON body, each field is text with one record per line):
+//   strava: "Type|Start ISO|End ISO|Value|Unit"   (Walking + Running Distance, Cycling Distance from Strava)
 import { createClient } from "npm:@supabase/supabase-js@2.118.0";
 
 const reply = (body: unknown, status = 200) =>
@@ -12,13 +14,90 @@ async function sha256(s: string) {
   return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
+/* ---------- formatting ---------- */
+function clock(totalSeconds: number) {
+  const s = Math.round(totalSeconds);
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+  return h ? `${h}:${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}` : `${m}:${String(sec).padStart(2, "0")}`;
+}
+function toMiles(value: number, unit: string) {
+  const u = unit.trim().toLowerCase();
+  if (u === "km") return value / 1.609344;
+  if (u === "m") return value / 1609.344;
+  if (u === "yd") return value / 1760;
+  return value; // mi
+}
+
+/* ---------- Strava workouts (one Apple Health record per workout) ---------- */
+function stravaEntries(userId: string, text: string) {
+  const rows: any[] = [];
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line) continue;
+    const [type, startIso, endIso, valueStr, unit = "mi"] = line.split("|").map((p) => p.trim());
+    const start = new Date(startIso), end = new Date(endIso);
+    const value = parseFloat(valueStr);
+    if (isNaN(start.getTime()) || isNaN(end.getTime()) || !isFinite(value)) continue;
+
+    const miles = toMiles(value, unit);
+    const seconds = Math.max(0, (end.getTime() - start.getTime()) / 1000);
+    const bike = /cycl/i.test(type);
+    const minPerMile = miles > 0 ? seconds / 60 / miles : 0;
+    const kind = bike ? "Bike" : minPerMile > 14 ? "Walk" : "Run";
+
+    const parts = [kind, `${miles.toFixed(2)} mi`, clock(seconds)];
+    if (miles >= 0.1 && seconds > 0) {
+      parts.push(bike ? `${(miles / (seconds / 3600)).toFixed(1)} mph` : `${clock(seconds / miles)} /mi`);
+    }
+    rows.push({
+      user_id: userId,
+      ts: start.toISOString(),
+      tz: null,
+      body: parts.join(" · "),
+      source: "strava",
+      source_id: `${bike ? "bike" : "foot"}:${start.toISOString()}`,
+      details: {
+        via: "apple_health", health_type: type, kind,
+        start: startIso, end: endIso,
+        distance_mi: Math.round(miles * 1000) / 1000, duration_s: Math.round(seconds),
+      },
+    });
+  }
+  return rows;
+}
+
+/* ---------- process every delivery not yet turned into entries ---------- */
+async function processPending(admin: any, userId: string) {
+  const { data: pending } = await admin.from("health_raw").select("id, payload")
+    .eq("user_id", userId).is("processed_at", null).order("id").limit(20);
+  let made = 0;
+  for (const d of pending || []) {
+    try {
+      const p = d.payload || {};
+      const rows = [
+        ...(typeof p.strava === "string" ? stravaEntries(userId, p.strava) : []),
+      ];
+      if (rows.length) {
+        const { error } = await admin.from("entries").upsert(rows, { onConflict: "user_id,source,source_id" });
+        if (error) throw new Error(error.message);
+      }
+      made += rows.length;
+      await admin.from("health_raw").update({ processed_at: new Date().toISOString(), process_error: null }).eq("id", d.id);
+    } catch (e) {
+      await admin.from("health_raw").update({ process_error: (e as Error).message }).eq("id", d.id);
+    }
+  }
+  return made;
+}
+
 Deno.serve(async (req) => {
   if (req.method !== "POST") return reply({ error: "Use POST." }, 405);
   const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 
   const key = req.headers.get("x-timeline-key") || new URL(req.url).searchParams.get("key") || "";
   if (!key) return reply({ error: "Missing key." }, 401);
-  const { data: k } = await admin.from("ingest_keys").select("user_id").eq("key_hash", await sha256(key)).maybeSingle();
+  const keyHash = await sha256(key);
+  const { data: k } = await admin.from("ingest_keys").select("user_id").eq("key_hash", keyHash).maybeSingle();
   if (!k) return reply({ error: "Wrong key." }, 401);
 
   const contentType = req.headers.get("content-type") || "";
@@ -33,11 +112,13 @@ Deno.serve(async (req) => {
   }).select("id").single();
   if (error) return reply({ error: "Couldn't store the delivery." }, 500);
 
+  const entries = await processPending(admin, k.user_id);
+
   const now = new Date().toISOString();
-  await admin.from("ingest_keys").update({ last_used_at: now }).eq("key_hash", await sha256(key));
+  await admin.from("ingest_keys").update({ last_used_at: now }).eq("key_hash", keyHash);
   await admin.from("connections").upsert({
     user_id: k.user_id, provider: "apple_health", status: "connected", last_sync_at: now, last_error: null,
   });
 
-  return reply({ ok: true, delivery: row.id, bytes: text.length });
+  return reply({ ok: true, delivery: row.id, entries });
 });

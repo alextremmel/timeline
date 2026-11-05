@@ -75,7 +75,7 @@ async function showForSession(session) {
   shell.hidden = !S.user;
   document.body.classList.toggle("app-on", !!S.user);
   if (S.user) fitViewport();
-  if (S.user && !S.loaded) { S.loaded = true; await loadEntries(true); }
+  if (S.user && !S.loaded) { S.loaded = true; await loadEntries(true); loadConnections(); syncStrava(); }
   if (!S.user) { S.loaded = false; S.entries.clear(); S.urls.clear(); renderFeed(); }
 }
 $("signinForm").addEventListener("submit", async e => {
@@ -103,6 +103,54 @@ $("signOutBtn").onclick = async () => {
 sb.auth.onAuthStateChange((event, session) => {
   if (event === "SIGNED_IN" || event === "SIGNED_OUT" || event === "INITIAL_SESSION") setTimeout(() => showForSession(session), 0);
 });
+
+/* ---------- outside connections (Strava) ---------- */
+const SOURCE_LABEL = { strava: "Strava", google_health: "Google Health" };
+function ago(ts) {
+  if (!ts) return "not yet";
+  const m = Math.round((Date.now() - ms(ts)) / 60000);
+  if (m < 1) return "just now";
+  if (m < 60) return m + " min ago";
+  const hr = Math.round(m / 60);
+  return hr < 24 ? hr + " hr ago" : Math.round(hr / 24) + " d ago";
+}
+async function loadConnections() {
+  const { data } = await sb.from("connections").select("provider, status, last_sync_at, last_error");
+  const c = (data || []).find(r => r.provider === "strava");
+  const box = $("stravaConn"); box.replaceChildren();
+  if (!c) box.append(h("button", { type: "button", class: "quiet on", onclick: connectStrava }, "Connect Strava"));
+  else if (c.status === "needs_reconnect") box.append(h("button", { type: "button", class: "quiet warn", onclick: connectStrava }, "Reconnect Strava"));
+  else box.append(h("span", { class: "quiet", title: c.last_error || "", text: (c.last_error ? "Strava sync problem · " : "Strava synced ") + ago(c.last_sync_at) }));
+  box.append(h("span", { "aria-hidden": "true", text: "·" }));
+}
+async function connectStrava() {
+  const { data, error } = await sb.functions.invoke("strava-start", { body: {} });
+  if (error || !data?.url) { toast(data?.error || "Couldn't start connecting Strava. Try again."); return; }
+  location.href = data.url;
+}
+async function syncStrava() {
+  try {
+    const { data } = await sb.functions.invoke("strava-sync", { body: {} });
+    const n = (data?.results || []).reduce((a, r) => a + (r.imported || 0), 0);
+    if (n) await loadEntries(true);
+  } catch { /* the hourly sync will catch up */ }
+  loadConnections();
+}
+(function handleReturn() {
+  const p = new URLSearchParams(location.search);
+  const s = p.get("strava");
+  if (!s) return;
+  history.replaceState(null, "", location.pathname);
+  const msg = {
+    connected: "Strava connected. Importing your activities…",
+    cancelled: "Strava wasn't connected.",
+    expired: "That took too long. Tap Connect Strava again.",
+    "needs-activity-access": "Strava needs permission to read your activities. Try again and leave that box checked.",
+    failed: "Strava didn't accept the connection. Try again.",
+  }[s] || "Strava: " + s;
+  setTimeout(() => toast(msg), 600);
+  if (s === "connected") setTimeout(() => { if (S.user) { loadEntries(true); loadConnections(); } }, 9000);
+})();
 
 /* ---------- data ---------- */
 const SELECT = "id, ts, tz, body, source, source_id, details, created_at, entry_photos(id, path, width, height, created_at)";
@@ -282,7 +330,7 @@ function renderEntry(e) {
   const li = h("li", { class: "entry" + (S.lastAdded === e.id ? " new" : "") });
   const head = h("div", { class: "entry-head" },
     h("span", { class: "time", text: fmtTime(e.ts) }),
-    !mine ? h("span", { class: "src", text: e.source }) : null);
+    !mine ? h("span", { class: "src", text: SOURCE_LABEL[e.source] || e.source }) : null);
   const main = mine
     ? h("button", { type: "button", class: "entry-main", "aria-expanded": String(S.openId === e.id),
         onclick: () => { S.openId = S.openId === e.id ? null : e.id; S.confirmId = null; renderFeed(); } }, head)
@@ -348,7 +396,7 @@ document.addEventListener("keydown", e => { if (e.key === "Escape") $("lightbox"
 
 /* refresh when the app comes back to the foreground */
 document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "visible" && S.user && !S.loading && !S.editing) loadEntries(true);
+  if (document.visibilityState === "visible" && S.user && !S.loading && !S.editing) { loadEntries(true); syncStrava(); }
 });
 
 /* ---------- boot ---------- */

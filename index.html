@@ -60,6 +60,7 @@
         <input id="searchInput" type="search" placeholder="Search your log" autocomplete="off" enterkeyhint="search">
         <button type="button" class="link" id="searchDone">Done</button>
       </div>
+      <div class="ref-chips" id="refChips" hidden></div>
       <div class="bar" id="logBar">
         <button type="button" class="icon-btn" id="moreMenuBtn" aria-label="More options" aria-haspopup="dialog">
           <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>
@@ -80,11 +81,51 @@
   </form>
 </div>
 
+<!-- References: full screen, styled like the log -->
+<section class="refs-view" id="refsView" hidden aria-label="References">
+  <div class="refs-scroll">
+    <div class="col">
+      <div class="refs-head">
+        <h2>References</h2>
+        <button type="button" class="link" id="refsDone">Done</button>
+      </div>
+      <p class="refs-intro">Link one in a log entry by typing its name and tapping the suggestion. Plain words never point here.</p>
+      <div id="refsList"></div>
+      <form id="refForm" class="ref-form" hidden autocomplete="off">
+        <label for="refName">Name</label>
+        <input id="refName" type="text" maxlength="80" placeholder="Soy milk" required>
+        <label for="refDesc">Description</label>
+        <textarea id="refDesc" rows="4" placeholder="Silk unsweetened organic, 80 cal per cup. What I use in coffee and oatmeal."></textarea>
+        <div class="ref-photo-row">
+          <div class="thumb" id="refPhotoThumb" hidden></div>
+          <label class="link" for="refPhotoInput" id="refPhotoLabel">Add photo</label>
+          <input id="refPhotoInput" type="file" accept="image/*" hidden>
+        </div>
+        <div id="refChangeBox" hidden>
+          <label for="refWhen">This change started</label>
+          <input id="refWhen" type="datetime-local">
+          <label class="check"><input type="checkbox" id="refTypo"> Just fixing a typo (don't keep the old version)</label>
+        </div>
+        <p class="ref-history" id="refHistory" hidden></p>
+        <div class="ref-actions">
+          <button type="submit" class="save-btn" id="refSave">Save</button>
+          <button type="button" class="link" id="refCancel">Cancel</button>
+          <button type="button" class="link" id="refArchive" hidden>Archive</button>
+        </div>
+      </form>
+    </div>
+  </div>
+  <div class="refs-foot" id="refsFoot"><button type="button" class="save-btn" id="refAdd">Add reference</button></div>
+</section>
+
 <div class="sheet-backdrop" id="sheetBackdrop" hidden></div>
 <div class="sheet" id="sheet" role="dialog" aria-modal="true" aria-label="More options" hidden>
   <div class="sheet-grip" aria-hidden="true"></div>
   <button type="button" class="sheet-item" id="syncStravaBtn">
     <span class="sheet-title">Sync Strava</span><span class="sheet-sub">Runs your Timeline Health shortcut</span>
+  </button>
+  <button type="button" class="sheet-item" id="refsBtn">
+    <span class="sheet-title">References</span><span class="sheet-sub">Things you mention a lot, like your usual milk</span>
   </button>
   <button type="button" class="sheet-item" id="searchBtn">
     <span class="sheet-title">Search</span><span class="sheet-sub">Find any entry in your log</span>

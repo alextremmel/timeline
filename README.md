@@ -38,6 +38,12 @@ A private, time-stamped personal log: free-text notes and photos in one feed, bu
 - Read-only; the secret key's hash lives in `export_keys` (set `revoked_at` to shut a key off)
 - Built on the `ai_timeline` and `ai_daily` views
 
+## References
+
+- `refs` + `ref_versions`: things mentioned often (a specific milk, a usual meal). Entries link one by writing `[[Name]]`; plain words never do.
+- Every change is a new dated version (`valid_from`), so the AI can tell what `[[Soy milk]]` meant on a given date. A typo fix can update the current version in place.
+- `ai_references` view and the top of the AI link list every version with its date range.
+
 ## Files
 
 - `index.html`, `styles.css`, `app.js` — the app

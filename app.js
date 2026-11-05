@@ -77,7 +77,7 @@ async function showForSession(session) {
   shell.hidden = !S.user;
   document.body.classList.toggle("app-on", !!S.user);
   if (S.user) fitViewport();
-  if (S.user && !S.loaded) { S.loaded = true; await loadOutbox(); await loadEntries(true); flushOutbox(); syncAll(); }
+  if (S.user && !S.loaded) { S.loaded = true; await loadOutbox(); await loadEntries(true); flushOutbox(); syncAll(); loadRefs(); }
   if (!S.user) { S.loaded = false; S.entries.clear(); S.urls.clear(); renderFeed(); }
 }
 $("signinForm").addEventListener("submit", async e => {
@@ -228,7 +228,7 @@ function autoGrow() {
   textEl.style.height = textEl.scrollHeight + 2 + "px";
   if (stick) toBottom();
 }
-textEl.addEventListener("input", () => { autoGrow(); updateTyping(); });
+textEl.addEventListener("input", () => { autoGrow(); updateTyping(); updateRefChips(); });
 function updateTyping() {
   $("composer").classList.toggle("typing", document.activeElement === textEl || textEl.value.trim() !== "");
 }
@@ -275,7 +275,7 @@ $("photoInput").addEventListener("change", async e => {
 
 function resetComposer() {
   for (const p of S.draft.photos) if (p.blob) URL.revokeObjectURL(p.preview);
-  S.draft = freshDraft(); S.editing = null; textEl.value = ""; textEl.style.height = ""; $("whenRow").hidden = true; updateTyping();
+  S.draft = freshDraft(); S.editing = null; textEl.value = ""; textEl.style.height = ""; $("whenRow").hidden = true; updateTyping(); updateRefChips();
   $("editFlag").hidden = true; $("composer").classList.remove("editing"); $("saveBtn").setAttribute("aria-label", "Log entry");
   renderThumbs(); renderWhen();
 }
@@ -557,7 +557,7 @@ function renderEntry(e) {
   // tap = log again, press and hold = edit / delete
   const photos = e.entry_photos || [];
   const row = h("div", { class: "note" + (S.openId === e.id ? " open" : "") + (S.editing === e.id ? " editing" : "") + (e.pending ? " pending" : "") });
-  const body = h("span", { class: "body" }); body.append(highlighted(e.body || ""));
+  const body = h("span", { class: "body" }); body.append(bodyWithTags(e.body || ""));
   const main = h("button", { type: "button", class: "note-main", "aria-label": e.pending ? undefined : "Log this again. Press and hold to edit or delete." },
     h("span", { class: "time", text: fmtTime(e.ts) }), body);
   if (!e.pending) pressable(main, () => logAgain(e), () => { S.openId = e.id; S.confirmId = null; renderFeed(); });
@@ -634,6 +634,194 @@ document.addEventListener("keydown", e => { if (e.key === "Escape") $("lightbox"
 /* refresh when the app comes back to the foreground */
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible" && S.user && !S.loading && !S.editing && !S.searching) { flushOutbox(); loadEntries(true); syncAll(); }
+});
+
+/* ---------- references ---------- */
+// An entry links a reference by writing [[Name]]. Each change to a reference is a new dated version.
+S.refs = [];          // [{id, archived_at, versions:[...newest first], cur}]
+S.refEdit = null;     // {ref|null, photo:{blob,w,h,preview}|null, removePhoto:bool}
+
+async function loadRefs() {
+  const [{ data: refs }, { data: vers }] = await Promise.all([
+    sb.from("refs").select("id, archived_at, created_at"),
+    sb.from("ref_versions").select("id, ref_id, valid_from, name, description, photo_path, photo_w, photo_h, created_at").order("valid_from", { ascending: false }),
+  ]);
+  const by = new Map((refs || []).map(r => [r.id, { ...r, versions: [] }]));
+  for (const v of vers || []) by.get(v.ref_id)?.versions.push(v);
+  S.refs = [...by.values()].filter(r => r.versions.length).map(r => ({ ...r, cur: r.versions[0] }))
+    .sort((a, b) => a.cur.name.localeCompare(b.cur.name));
+  const paths = S.refs.map(r => r.cur.photo_path).filter(Boolean).filter(p => !S.urls.get(p));
+  if (paths.length) {
+    const { data } = await sb.storage.from(BUCKET).createSignedUrls(paths, 3600);
+    for (const r of data || []) if (r.signedUrl) S.urls.set(r.path, { url: r.signedUrl, exp: Date.now() + 3600e3 });
+  }
+  if (!$("refsView").hidden && $("refForm").hidden) renderRefs();
+}
+
+/* tags in entries */
+function bodyWithTags(text) {
+  const frag = document.createDocumentFragment();
+  const re = /\[\[([^\]\n]{1,80})\]\]/g;
+  let i = 0, m;
+  while ((m = re.exec(text))) {
+    frag.append(highlighted(text.slice(i, m.index)));
+    frag.append(h("span", { class: "ref-tag", text: m[1] }));
+    i = m.index + m[0].length;
+  }
+  frag.append(highlighted(text.slice(i)));
+  return frag;
+}
+
+/* suggestion chips while typing */
+function updateRefChips() {
+  const box = $("refChips");
+  const active = S.refs.filter(r => !r.archived_at);
+  const caret = textEl.selectionStart ?? textEl.value.length;
+  const before = textEl.value.slice(0, caret);
+  // nothing to match: no references, empty, just typed a space, or inside an existing [[link]]
+  if (!active.length || !before || /\s$/.test(before) || /\[\[[^\]]*$/.test(before)) { box.hidden = true; return; }
+  const hits = new Map();
+  // the last 1, 2 or 3 words typed, matched against the start of each name
+  for (let n = 1; n <= 3; n++) {
+    const m = before.match(new RegExp(`(?:^|\\s)(\\S+(?:\\s+\\S+){${n - 1}})$`));
+    if (!m) break;
+    const frag = m[1], q = frag.toLowerCase();
+    if (q.length < 2 || q.includes("]]")) continue;
+    for (const r of active) if (r.cur.name.toLowerCase().startsWith(q) && !hits.has(r.id)) hits.set(r.id, { r, fragLen: frag.length });
+  }
+  box.replaceChildren(...[...hits.values()].slice(0, 3).map(({ r, fragLen }) =>
+    h("button", { type: "button", class: "ref-chip", onmousedown: ev => ev.preventDefault(), onclick: () => insertRef(r.cur.name, fragLen) },
+      h("span", { class: "ref-chip-mark", "aria-hidden": "true", text: "↳" }), r.cur.name)));
+  box.hidden = !hits.size;
+}
+function insertRef(name, fragLen) {
+  const caret = textEl.selectionStart ?? textEl.value.length;
+  const v = textEl.value;
+  const start = caret - fragLen;
+  const lead = start > 0 && !/\s/.test(v[start - 1]) ? " " : "";
+  const ins = `${lead}[[${name}]] `;
+  textEl.value = v.slice(0, start) + ins + v.slice(caret).replace(/^\s+/, "");
+  const pos = start + ins.length;
+  textEl.focus(); textEl.setSelectionRange(pos, pos);
+  autoGrow(); updateTyping(); updateRefChips();
+}
+textEl.addEventListener("click", updateRefChips);
+textEl.addEventListener("blur", () => setTimeout(() => { if (document.activeElement !== textEl) $("refChips").hidden = true; }, 150));
+
+/* references screen */
+const fmtDate = t => new Date(t).toLocaleDateString([], { month: "short", day: "numeric", year: new Date(t).getFullYear() === new Date().getFullYear() ? undefined : "numeric" });
+function openRefs() { closeSheet(); $("refsView").hidden = false; showRefList(); loadRefs(); }
+function closeRefs() { $("refsView").hidden = true; S.refEdit = null; }
+$("refsBtn").onclick = openRefs;
+$("refsDone").onclick = closeRefs;
+function showRefList() {
+  $("refForm").hidden = true; $("refsList").hidden = false; $("refsFoot").hidden = false;
+  document.querySelector(".refs-intro").hidden = false;
+  renderRefs();
+}
+let showArchived = false;
+function refRow(r) {
+  const u = r.cur.photo_path ? S.urls.get(r.cur.photo_path)?.url : null;
+  const since = r.versions.length > 1 ? "changed " + fmtDate(r.cur.valid_from) : "since " + fmtDate(r.cur.valid_from);
+  return h("button", { type: "button", class: "ref-row" + (r.archived_at ? " archived" : ""), onclick: () => editRef(r) },
+    h("span", { class: "ref-text" },
+      h("span", { class: "ref-name", text: r.cur.name }),
+      r.cur.description ? h("span", { class: "ref-desc", text: r.cur.description }) : null,
+      h("span", { class: "ref-since", text: r.archived_at ? "archived " + fmtDate(r.archived_at) : since })),
+    u ? h("span", { class: "thumb-r" }, h("img", { src: u, alt: "" })) : null);
+}
+function renderRefs() {
+  const list = $("refsList"); list.replaceChildren();
+  const active = S.refs.filter(r => !r.archived_at), archived = S.refs.filter(r => r.archived_at);
+  if (!active.length) list.append(h("div", { class: "empty" }, h("strong", { text: "No references yet" }),
+    "Add the things you mention often, like your usual milk or a supplement, so the AI knows exactly what you mean."));
+  for (const r of active) list.append(refRow(r));
+  if (archived.length) {
+    list.append(h("button", { type: "button", class: "link refs-archived-toggle", onclick: () => { showArchived = !showArchived; renderRefs(); } },
+      (showArchived ? "Hide" : "Show") + ` archived (${archived.length})`));
+    if (showArchived) for (const r of archived) list.append(refRow(r));
+  }
+}
+function setRefPhoto(url) {
+  const t = $("refPhotoThumb"); t.replaceChildren();
+  if (url) {
+    t.append(h("img", { src: url, alt: "Reference photo" }),
+      h("button", { type: "button", "aria-label": "Remove photo", onclick: () => { S.refEdit.photo = null; S.refEdit.removePhoto = true; setRefPhoto(null); } }, "×"));
+  }
+  t.hidden = !url; $("refPhotoLabel").textContent = url ? "Change photo" : "Add photo";
+}
+function editRef(r) {
+  S.refEdit = { ref: r || null, photo: null, removePhoto: false };
+  $("refsList").hidden = true; $("refsFoot").hidden = true; document.querySelector(".refs-intro").hidden = true;
+  $("refForm").hidden = false;
+  $("refName").value = r ? r.cur.name : "";
+  $("refDesc").value = r ? (r.cur.description || "") : "";
+  setRefPhoto(r && r.cur.photo_path ? S.urls.get(r.cur.photo_path)?.url : null);
+  $("refChangeBox").hidden = !r;
+  $("refWhen").value = toLocalInput(Date.now()); $("refTypo").checked = false;
+  $("refArchive").hidden = !r; $("refArchive").textContent = r?.archived_at ? "Unarchive" : "Archive";
+  const hist = $("refHistory");
+  if (r && r.versions.length > 1) {
+    hist.hidden = false;
+    hist.textContent = "Earlier versions: " + r.versions.slice(1).map(v => `${v.name} (from ${fmtDate(v.valid_from)}): ${v.description || "no description"}`).join(" · ");
+  } else hist.hidden = true;
+  $("refName").focus();
+}
+$("refAdd").onclick = () => editRef(null);
+$("refCancel").onclick = showRefList;
+$("refPhotoInput").addEventListener("change", async ev => {
+  const f = ev.target.files[0]; ev.target.value = "";
+  if (!f) return;
+  try { const r = await shrink(f); S.refEdit.photo = { ...r, preview: URL.createObjectURL(r.blob) }; S.refEdit.removePhoto = false; setRefPhoto(S.refEdit.photo.preview); }
+  catch { toast("That photo couldn't be read. Try a different one."); }
+});
+$("refArchive").onclick = async () => {
+  const r = S.refEdit?.ref; if (!r) return;
+  const { error } = await sb.from("refs").update({ archived_at: r.archived_at ? null : new Date().toISOString() }).eq("id", r.id);
+  if (error) { toast("Couldn't update. Check your connection."); return; }
+  toast(r.archived_at ? "Unarchived" : "Archived. Old entries still point to it.");
+  await loadRefs(); showRefList();
+};
+$("refForm").addEventListener("submit", async ev => {
+  ev.preventDefault();
+  const name = $("refName").value.trim().replace(/[\[\]]/g, "");
+  const description = $("refDesc").value.trim() || null;
+  if (!name) { toast("Give it a name first."); return; }
+  const clash = S.refs.find(r => !r.archived_at && r.cur.name.toLowerCase() === name.toLowerCase() && r.id !== S.refEdit?.ref?.id);
+  if (clash) { toast(`You already have “${clash.cur.name}”. Pick a different name.`); return; }
+  const btn = $("refSave"); btn.disabled = true;
+  try {
+    const r = S.refEdit.ref;
+    let refId = r?.id;
+    if (!refId) {
+      const { data, error } = await sb.from("refs").insert({}).select("id").single();
+      if (error) throw error;
+      refId = data.id;
+    }
+    const versionId = uuid();
+    let photo_path = r?.cur.photo_path || null, photo_w = r?.cur.photo_w || null, photo_h = r?.cur.photo_h || null;
+    if (S.refEdit.removePhoto) photo_path = photo_w = photo_h = null;
+    if (S.refEdit.photo) {
+      photo_path = `${S.user.id}/refs/${versionId}.jpg`;
+      const up = await sb.storage.from(BUCKET).upload(photo_path, S.refEdit.photo.blob, { contentType: "image/jpeg", upsert: false });
+      if (up.error) throw up.error;
+      photo_w = S.refEdit.photo.w; photo_h = S.refEdit.photo.h;
+    }
+    const unchanged = r && r.cur.name === name && (r.cur.description || null) === description && photo_path === r.cur.photo_path;
+    if (unchanged) { showRefList(); return; }
+    if (r && $("refTypo").checked) {
+      const { error } = await sb.from("ref_versions").update({ name, description, photo_path, photo_w, photo_h }).eq("id", r.cur.id);
+      if (error) throw error;
+    } else {
+      const when = r ? new Date($("refWhen").value || Date.now()).toISOString() : new Date().toISOString();
+      const { error } = await sb.from("ref_versions").insert({ id: versionId, ref_id: refId, valid_from: when, name, description, photo_path, photo_w, photo_h });
+      if (error) throw error;
+    }
+    toast(r ? "Saved. The earlier version is kept with its dates." : "Added");
+    await loadRefs(); showRefList();
+  } catch (e) {
+    console.error(e); toast("Couldn't save. Check your connection and try again.");
+  } finally { btn.disabled = false; }
 });
 
 /* ---------- boot ---------- */

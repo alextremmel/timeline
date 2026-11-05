@@ -1,5 +1,6 @@
 // Read-only export of the timeline for any AI: GET /functions/v1/ai-export?key=SECRET
-// Options: days=30 (1-3650), format=text|json|csv, view=timeline (default)|daily|both, photos=links
+// Options: days=30 (1-3650), format=text|json|csv, view=timeline (default)|daily|both|references, photos=links
+// Reference items (linked from entries as [[Name]]) are always included first, with each version's dates.
 // It can only read. The key is checked against a hash in export_keys.
 import { createClient } from "npm:@supabase/supabase-js@2.118.0";
 
@@ -65,7 +66,7 @@ Deno.serve(async (req) => {
   const withPhotoLinks = url.searchParams.get("photos") === "links";
   const since = new Date(Date.now() - days * 86400_000).toISOString().slice(0, 10);
 
-  const wantDaily = view !== "timeline", wantTimeline = view !== "daily";
+  const wantDaily = view === "daily" || view === "both", wantTimeline = view === "timeline" || view === "both";
   const [{ data: daily, error: e1 }, { data: timeline, error: e2 }] = await Promise.all([
     wantDaily
       ? admin.from("ai_daily").select("local_date, day_of_week, sleep_minutes, bedtime_local, wake_local, deep_minutes, rem_minutes, resting_hr_bpm, hrv_ms, steps, active_kcal, workouts, run_walk_miles, bike_miles, workout_list, notes")
@@ -77,6 +78,32 @@ Deno.serve(async (req) => {
       : Promise.resolve({ data: [], error: null }),
   ]);
   if (e1 || e2) return send("Couldn't read the data right now. Try again.", "text/plain", 500);
+
+  // Reference items: every version, with the dates it applied
+  const { data: refRows } = await admin.from("ai_references")
+    .select("ref_id, name, description, photo_path, valid_from_local, valid_until_local, archived, archived_at_local")
+    .eq("user_id", k.user_id).order("ref_id").order("valid_from_local");
+  const refPhotoLinks = new Map<string, string>();
+  if (withPhotoLinks) {
+    const paths = (refRows || []).map((r: any) => r.photo_path).filter(Boolean);
+    if (paths.length) {
+      const { data: signed } = await admin.storage.from("photos").createSignedUrls(paths, 7 * 86400);
+      for (const s2 of signed || []) if (s2.signedUrl) refPhotoLinks.set(s2.path, s2.signedUrl);
+    }
+  }
+  const refMap = new Map<string, any>();
+  for (const r of refRows || []) {
+    const item = refMap.get(r.ref_id) || { name: r.name, archived: r.archived, archived_at: r.archived_at_local?.slice(0, 16).replace("T", " ") ?? null, versions: [] as any[] };
+    item.name = r.name; // current name = latest version
+    item.versions.push({
+      name: r.name, from: r.valid_from_local?.slice(0, 16).replace("T", " "),
+      until: r.valid_until_local ? r.valid_until_local.slice(0, 16).replace("T", " ") : null,
+      description: r.description, has_photo: !!r.photo_path,
+      ...(withPhotoLinks && r.photo_path ? { photo_link: refPhotoLinks.get(r.photo_path) || null } : {}),
+    });
+    refMap.set(r.ref_id, item);
+  }
+  const references = [...refMap.values()].sort((a, b) => a.name.localeCompare(b.name));
 
   // Optional photo links (valid 7 days)
   const photoLinks = new Map<string, string[]>();
@@ -103,11 +130,17 @@ Deno.serve(async (req) => {
   if (format === "json") {
     return send(JSON.stringify({
       generated_at: new Date().toISOString(), days, since,
+      references_note: "Entries link a reference item by writing [[Name]]. Use the version whose from/until dates contain the entry's time. Plain words without [[ ]] do NOT refer to reference items.",
+      references,
       notes: "Times are local to the timezone given. Sleep is listed at wake time and its resting HR/HRV belong to that morning. day_total is Fitbit steps and active calories for a finished day. Manual notes are free text written by the person (food, mood, symptoms, weight, etc.).",
       daily: wantDaily ? daily : undefined, timeline: wantTimeline ? tl : undefined,
     }, null, 2), "application/json");
   }
   if (format === "csv") {
+    if (view === "references") {
+      const flat = references.flatMap((r: any) => r.versions.map((v: any) => ({ name: v.name, from: v.from, until: v.until || "", archived: r.archived, description: v.description || "", photo_link: v.photo_link || "" })));
+      return send(toCsv(flat, ["name", "from", "until", "archived", "description", ...(withPhotoLinks ? ["photo_link"] : [])]), "text/csv");
+    }
     if (view === "daily") return send(toCsv(daily || [], Object.keys((daily || [])[0] || { local_date: 1 })), "text/csv");
     const flat = tl.map((r: any) => ({ ...r, metrics: r.metrics ? JSON.stringify(r.metrics) : "", photo_links: (r.photo_links || []).join(" ") }));
     return send(toCsv(flat, ["date", "day", "time", "timezone", "source", "kind", "text", "photos", ...(withPhotoLinks ? ["photo_links"] : []), "metrics"]), "text/csv");
@@ -118,6 +151,17 @@ Deno.serve(async (req) => {
   lines.push(`PERSONAL TIMELINE — last ${days} days (from ${since}), generated ${new Date().toISOString()}`);
   lines.push("Sources: manual = notes and photos the person logged; strava = workouts; fitbit = sleep (listed at wake time, with that morning's resting HR and HRV) and day totals (steps, active calories, at 23:59).");
   lines.push("All times are local (America/New_York unless shown otherwise).");
+  if (references.length) {
+    lines.push("", "=== REFERENCES ===");
+    lines.push("Entries link these by writing [[Name]]. Use the version whose dates contain the entry's time. Plain words without [[ ]] do NOT refer to these.");
+    for (const r of references) {
+      lines.push("", `[[${r.name}]]${r.archived ? ` (archived ${r.archived_at})` : ""}`);
+      for (const v of r.versions) {
+        const photo = v.photo_link ? ` [photo: ${v.photo_link}]` : v.has_photo ? " [has photo]" : "";
+        lines.push(`  ${v.from} → ${v.until || "now"}${v.name !== r.name ? ` (named "${v.name}")` : ""}: ${(v.description || "(no description)").replace(/\s*\n\s*/g, " / ")}${photo}`);
+      }
+    }
+  }
   if (wantDaily && daily?.length) {
     lines.push("", "=== DAILY SUMMARY ===");
     lines.push("date | day | sleep | bed–wake | deep/REM min | resting HR | HRV ms | steps | active kcal | workouts");

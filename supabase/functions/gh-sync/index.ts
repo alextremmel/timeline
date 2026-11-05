@@ -83,9 +83,122 @@ async function dailyRollUp(admin: any, userId: string, token: string, dataType: 
 }
 
 /* ---------- turn stored responses into timeline entries ---------- */
-// Filled in once the real response shapes have been checked.
-async function buildEntries(_admin: any, _userId: string) {
-  return 0;
+const offsetSec = (o?: string) => (o ? parseInt(o, 10) || 0 : 0); // "-18000s" -> -18000
+const localDate = (iso: string, off: string) => new Date(new Date(iso).getTime() + offsetSec(off) * 1000).toISOString().slice(0, 10);
+const civilYmd = (d: any) => d ? `${d.year}-${String(d.month).padStart(2, "0")}-${String(d.day).padStart(2, "0")}` : null;
+function hm(min: number) {
+  min = Math.round(min);
+  const h = Math.floor(min / 60), m = min % 60;
+  return h ? `${h}h ${String(m).padStart(2, "0")}m` : `${m}m`;
+}
+function clockAt(iso: string, off: string) {
+  const d = new Date(new Date(iso).getTime() + offsetSec(off) * 1000);
+  let h = d.getUTCHours(); const m = d.getUTCMinutes(); const ap = h < 12 ? "AM" : "PM";
+  h = h % 12 || 12;
+  return `${h}:${String(m).padStart(2, "0")} ${ap}`;
+}
+// UTC instant for a local wall-clock time on a date in an IANA time zone
+function zonedInstant(ymdStr: string, hh: number, mm: number, tz: string) {
+  const guess = new Date(`${ymdStr}T${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}:00Z`);
+  const parts = Object.fromEntries(new Intl.DateTimeFormat("en-US", {
+    timeZone: tz, hourCycle: "h23", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit",
+  }).formatToParts(guess).map((p) => [p.type, p.value]));
+  const asLocal = Date.UTC(+parts.year, +parts.month - 1, +parts.day, +parts.hour, +parts.minute);
+  return new Date(guess.getTime() - (asLocal - guess.getTime()));
+}
+
+async function buildEntries(admin: any, userId: string) {
+  const { data: raws } = await admin.from("google_raw").select("id, data_type, response")
+    .eq("user_id", userId).eq("status", 200).is("processed_at", null).order("id");
+  if (!raws?.length) return 0;
+
+  const { data: lastMine } = await admin.from("entries").select("tz").eq("user_id", userId)
+    .eq("source", "me").not("tz", "is", null).order("ts", { ascending: false }).limit(1);
+  const tz = lastMine?.[0]?.tz || "America/New_York";
+
+  const sleeps = new Map<string, any>();
+  const rhr = new Map<string, number>();
+  const hrv = new Map<string, any>();
+  const days = new Map<string, { steps?: number; activeCal?: number }>();
+  for (const r of raws) {
+    const body = r.response || {};
+    for (const p of body.dataPoints || []) {
+      if (p.sleep) sleeps.set(p.name || p.sleep.interval?.startTime, p);
+      if (p.dailyRestingHeartRate) { const d = civilYmd(p.dailyRestingHeartRate.date); if (d) rhr.set(d, Number(p.dailyRestingHeartRate.beatsPerMinute)); }
+      if (p.dailyHeartRateVariability) { const d = civilYmd(p.dailyHeartRateVariability.date); if (d) hrv.set(d, p.dailyHeartRateVariability); }
+    }
+    for (const p of body.rollupDataPoints || []) {
+      const d = civilYmd(p.civilStartTime?.date); if (!d) continue;
+      const day = days.get(d) || {};
+      if (p.steps) day.steps = Number(p.steps.countSum || 0);
+      if (p.activeEnergyBurned) day.activeCal = Number(p.activeEnergyBurned.kcalSum || 0);
+      days.set(d, day);
+    }
+  }
+
+  const rows: any[] = [];
+  // Sleep: one entry at wake-up time, with that morning's resting HR and HRV
+  for (const [key, p] of sleeps) {
+    const s = p.sleep, iv = s.interval || {}, sum = s.summary || {};
+    if (!iv.startTime || !iv.endTime) continue;
+    const wakeDate = localDate(iv.endTime, iv.endUtcOffset);
+    const stage = (t: string) => Number((sum.stagesSummary || []).find((x: any) => x.type === t)?.minutes || 0);
+    const asleep = Number(sum.minutesAsleep || 0);
+    const main = s.metadata?.mainSleep !== false;
+    const line1 = `${main ? "Sleep" : "Nap"} · ${hm(asleep)} asleep (${clockAt(iv.startTime, iv.startUtcOffset)}–${clockAt(iv.endTime, iv.endUtcOffset)})`;
+    const stageBits = [["Deep", "DEEP"], ["REM", "REM"], ["Light", "LIGHT"], ["Awake", "AWAKE"]]
+      .filter(([, t]) => stage(t) > 0).map(([label, t]) => `${label} ${hm(stage(t))}`);
+    const vitals: string[] = [];
+    if (main && rhr.has(wakeDate)) vitals.push(`resting HR ${rhr.get(wakeDate)}`);
+    if (main && hrv.has(wakeDate)) vitals.push(`HRV ${Math.round(hrv.get(wakeDate).averageHeartRateVariabilityMilliseconds)} ms`);
+    rows.push({
+      user_id: userId, ts: iv.endTime, tz, source: "google_health",
+      source_id: `sleep:${String(key).split("/").pop()}`,
+      body: [line1, stageBits.join(" · "), vitals.join(" · ")].filter(Boolean).join("\n"),
+      details: {
+        kind: main ? "sleep" : "nap", wake_date: wakeDate,
+        start: iv.startTime, end: iv.endTime, utc_offset: iv.endUtcOffset,
+        minutes_asleep: asleep, minutes_awake: Number(sum.minutesAwake || 0), minutes_in_period: Number(sum.minutesInSleepPeriod || 0),
+        stages_minutes: Object.fromEntries((sum.stagesSummary || []).map((x: any) => [x.type.toLowerCase(), Number(x.minutes)])),
+        stages: (s.stages || []).map((x: any) => [x.type, x.startTime, x.endTime]),
+        resting_hr: main ? rhr.get(wakeDate) ?? null : null,
+        hrv: main ? hrv.get(wakeDate) ?? null : null,
+        device: p.dataSource?.device?.displayName || null,
+      },
+    });
+  }
+  // Days with resting HR / HRV but no sleep record still get those numbers in the day total
+  const sleepDates = new Set(rows.filter((r) => r.details.kind === "sleep").map((r) => r.details.wake_date));
+
+  // Day totals for finished days, placed at 11:59 PM
+  const today = new Intl.DateTimeFormat("en-CA", { timeZone: tz }).format(new Date());
+  for (const [d, v] of days) {
+    if (d >= today) continue;
+    const bits: string[] = [];
+    if (v.steps != null) bits.push(`${v.steps.toLocaleString("en-US")} steps`);
+    if (v.activeCal != null) bits.push(`${Math.round(v.activeCal).toLocaleString("en-US")} active cal`);
+    if (!sleepDates.has(d)) {
+      if (rhr.has(d)) bits.push(`resting HR ${rhr.get(d)}`);
+      if (hrv.has(d)) bits.push(`HRV ${Math.round(hrv.get(d).averageHeartRateVariabilityMilliseconds)} ms`);
+    }
+    if (!bits.length) continue;
+    rows.push({
+      user_id: userId, ts: zonedInstant(d, 23, 59, tz).toISOString(), tz, source: "google_health",
+      source_id: `day:${d}`, body: `Day total · ${bits.join(" · ")}`,
+      details: { kind: "day", date: d, steps: v.steps ?? null, active_kcal: v.activeCal != null ? Math.round(v.activeCal) : null,
+        resting_hr: rhr.get(d) ?? null, hrv: hrv.get(d) ?? null },
+    });
+  }
+
+  for (let i = 0; i < rows.length; i += 200) {
+    const { error } = await admin.from("entries").upsert(rows.slice(i, i + 200), { onConflict: "user_id,source,source_id" });
+    if (error) throw new Error("saving entries failed: " + error.message);
+  }
+  await admin.from("google_raw").update({ processed_at: new Date().toISOString() }).in("id", raws.map((r: any) => r.id));
+  // keep storage small: raw responses are only needed briefly once processed
+  await admin.from("google_raw").delete().eq("user_id", userId).not("processed_at", "is", null)
+    .lt("fetched_at", new Date(Date.now() - 3 * 86400_000).toISOString());
+  return rows.length;
 }
 
 async function syncUser(admin: any, row: any, conn: any) {

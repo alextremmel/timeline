@@ -1,5 +1,5 @@
 // Read-only export of the timeline for any AI: GET /functions/v1/ai-export?key=SECRET
-// Options: days=30 (1-3650), format=text|json|csv, view=both|daily|timeline, photos=links
+// Options: days=30 (1-3650), format=text|json|csv, view=timeline (default)|daily|both, photos=links
 // It can only read. The key is checked against a hash in export_keys.
 import { createClient } from "npm:@supabase/supabase-js@2.118.0";
 
@@ -61,7 +61,7 @@ Deno.serve(async (req) => {
 
   const days = Math.min(3650, Math.max(1, parseInt(url.searchParams.get("days") || "30", 10) || 30));
   const format = (url.searchParams.get("format") || "text").toLowerCase();
-  const view = (url.searchParams.get("view") || "both").toLowerCase();
+  const view = (url.searchParams.get("view") || "timeline").toLowerCase();
   const withPhotoLinks = url.searchParams.get("photos") === "links";
   const since = new Date(Date.now() - days * 86400_000).toISOString().slice(0, 10);
 

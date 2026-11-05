@@ -75,7 +75,7 @@ async function showForSession(session) {
   shell.hidden = !S.user;
   document.body.classList.toggle("app-on", !!S.user);
   if (S.user) fitViewport();
-  if (S.user && !S.loaded) { S.loaded = true; await loadEntries(true); loadLive(); syncAll(); }
+  if (S.user && !S.loaded) { S.loaded = true; await loadEntries(true); syncAll(); }
   if (!S.user) { S.loaded = false; S.entries.clear(); S.urls.clear(); renderFeed(); }
 }
 $("signinForm").addEventListener("submit", async e => {
@@ -150,7 +150,6 @@ async function syncAll() {
     } catch { /* the hourly sync will catch up */ }
   }));
   if (changed) await loadEntries(true);
-  loadLive();
   loadConnections();
 }
 (function handleReturn() {
@@ -446,22 +445,6 @@ async function del(e) {
   if (S.editing === e.id) resetComposer();
   renderFeed(); toast("Deleted");
 }
-async function loadLive() {
-  const { data } = await sb.from("live_today").select("local_date, steps, active_kcal, updated_at").maybeSingle();
-  S.live = data || null;
-  renderFeed();
-}
-function livePill() {
-  const L = S.live;
-  if (!L || L.local_date !== dayKey(Date.now())) return null;
-  const doneToday = [...S.entries.values()].some(e => e.details?.kind === "day" && e.details?.date === L.local_date);
-  if (doneToday || (L.steps == null && L.active_kcal == null)) return null;
-  return h("div", { class: "live", title: "Updated " + fmtTime(L.updated_at) },
-    h("span", { class: "dot", "aria-hidden": "true" }),
-    h("span", { class: "muted", text: "Today so far" }),
-    L.steps != null ? stat(num(L.steps), "steps") : null,
-    L.active_kcal != null ? stat(num(L.active_kcal), "cal") : null);
-}
 function renderFeed() {
   const feed = $("feed");
   const list = [...S.entries.values()].sort((a, b) => ms(a.ts) - ms(b.ts));
@@ -479,14 +462,6 @@ function renderFeed() {
         box = h("div", { class: "items" }); sec.append(box); feed.append(sec);
       }
       box.append(renderEntry(e));
-    }
-    const pill = livePill();
-    if (pill) {
-      if (curDay !== dayKey(Date.now())) {
-        const sec = h("section", { class: "day" }, h("h2", { text: dayLabel(dayKey(Date.now())) }));
-        box = h("div", { class: "items" }); sec.append(box); feed.append(sec);
-      }
-      box.append(pill);
     }
   }
   $("moreBtn").hidden = !S.hasMore || S.loading;

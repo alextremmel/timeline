@@ -32,6 +32,12 @@ A private, time-stamped personal log: free-text notes and photos in one feed, bu
 - `supabase/functions/gh-sync` — hourly (pg_cron job `google-health-sync-hourly`) and on app open; pulls sleep, daily resting heart rate, daily HRV, steps and active calories; raw responses kept in `google_raw`
 - Needs Edge Function secrets `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`
 
+## Read-only AI link
+
+- `supabase/functions/ai-export` — `GET /functions/v1/ai-export?key=…` returns the timeline as plain text (default), `format=json` or `format=csv`; `days=N` (default 30), `view=daily|timeline|both`, `photos=links` for 7-day photo links
+- Read-only; the secret key's hash lives in `export_keys` (set `revoked_at` to shut a key off)
+- Built on the `ai_timeline` and `ai_daily` views
+
 ## Files
 
 - `index.html`, `styles.css`, `app.js` — the app

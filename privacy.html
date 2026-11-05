@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Timeline privacy</title>
+<style>
+  body{margin:0;background:#EDF0EF;color:#15201D;font:16px/1.55 system-ui,-apple-system,sans-serif}
+  main{max-width:640px;margin:0 auto;padding:32px 16px 48px}
+  h1{font-size:1.5rem;margin:0 0 4px} h2{font-size:1.05rem;margin:28px 0 6px}
+  p,li{max-width:65ch} .muted{color:#5A6865}
+  @media (prefers-color-scheme: dark){body{background:#0E1412;color:#E3EBE8}.muted{color:#93A39F}}
+</style>
+</head>
+<body>
+<main>
+  <h1>Timeline privacy policy</h1>
+  <p class="muted">Last updated November 5, 2026</p>
+
+  <p>Timeline is a personal app built and used by one person, its owner. It is not offered to the public, and nobody else can create an account.</p>
+
+  <h2>What it stores</h2>
+  <ul>
+    <li>Notes and photos the owner logs in the app.</li>
+    <li>Workout records the owner sends from their own iPhone.</li>
+    <li>With the owner's permission, read-only data from the owner's Google Health account: sleep, resting heart rate, heart rate variability, steps and active calories.</li>
+  </ul>
+
+  <h2>How it's used</h2>
+  <p>The data is shown back to the owner as a private timeline and may be reviewed by AI tools the owner chooses, at the owner's request. It is never sold, shared with advertisers, or used to train AI models.</p>
+
+  <h2>Where it's kept</h2>
+  <p>Everything is stored in the owner's private Supabase database. Access is limited to the owner's signed-in account. Google access tokens are stored server-side and are never visible in the app.</p>
+
+  <h2>Google user data</h2>
+  <p>Timeline's use of information received from Google APIs adheres to the Google API Services User Data Policy, including the Limited Use requirements. Access can be revoked at any time from the Google Account's third-party connections page.</p>
+
+  <h2>Deleting data</h2>
+  <p>The owner can delete any entry in the app, and can delete all data by deleting the Supabase project.</p>
+</main>
+</body>
+</html>

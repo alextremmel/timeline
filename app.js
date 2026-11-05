@@ -75,7 +75,7 @@ async function showForSession(session) {
   shell.hidden = !S.user;
   document.body.classList.toggle("app-on", !!S.user);
   if (S.user) fitViewport();
-  if (S.user && !S.loaded) { S.loaded = true; await loadEntries(true); loadConnections(); }
+  if (S.user && !S.loaded) { S.loaded = true; await loadEntries(true); syncAll(); }
   if (!S.user) { S.loaded = false; S.entries.clear(); S.urls.clear(); renderFeed(); }
 }
 $("signinForm").addEventListener("submit", async e => {
@@ -104,8 +104,8 @@ sb.auth.onAuthStateChange((event, session) => {
   if (event === "SIGNED_IN" || event === "SIGNED_OUT" || event === "INITIAL_SESSION") setTimeout(() => showForSession(session), 0);
 });
 
-/* ---------- outside connections (Strava) ---------- */
-const SOURCE_LABEL = { strava: "Strava", google_health: "Google Health", apple_health: "Apple Health" };
+/* ---------- outside connections ---------- */
+const SOURCE_LABEL = { strava: "Strava", google_health: "Fitbit", apple_health: "Apple Health" };
 function ago(ts) {
   if (!ts) return "not yet";
   const m = Math.round((Date.now() - ms(ts)) / 60000);
@@ -114,47 +114,62 @@ function ago(ts) {
   const hr = Math.round(m / 60);
   return hr < 24 ? hr + " hr ago" : Math.round(hr / 24) + " d ago";
 }
+const PROVIDERS = {
+  google_health: { name: "Google Health", start: "gh-start", sync: "gh-sync", alwaysShow: true },
+  strava: { name: "Strava", start: "strava-start", sync: "strava-sync", alwaysShow: false },
+};
 async function loadConnections() {
   const { data } = await sb.from("connections").select("provider, status, last_sync_at, last_error");
+  const rows = data || [];
   const box = $("stravaConn"); box.replaceChildren();
-  // Apple Health (via the iPhone Shortcut): show when data last arrived
-  const ah = (data || []).find(r => r.provider === "apple_health");
-  if (ah) box.append(h("span", { class: "quiet", text: "Apple Health synced " + ago(ah.last_sync_at) }), h("span", { "aria-hidden": "true", text: "·" }));
-  // Strava direct sync (only shown if it was ever connected; needs a Strava subscription)
-  const c = (data || []).find(r => r.provider === "strava");
-  if (c) {
-    if (c.status === "needs_reconnect") box.append(h("button", { type: "button", class: "quiet warn", onclick: connectStrava }, "Reconnect Strava"));
-    else box.append(h("span", { class: "quiet", text: (c.last_error ? "Strava sync problem · " : "Strava synced ") + ago(c.last_sync_at) }));
-    box.append(h("span", { "aria-hidden": "true", text: "·" }));
+  const dot = () => h("span", { "aria-hidden": "true", text: "·" });
+  // Strava workouts arrive through the iPhone Shortcut (Apple Health)
+  const ah = rows.find(r => r.provider === "apple_health");
+  if (ah) box.append(h("span", { class: "quiet", text: "Strava synced " + ago(ah.last_sync_at) }), dot());
+  for (const [key, p] of Object.entries(PROVIDERS)) {
+    const c = rows.find(r => r.provider === key);
+    if (!c) { if (p.alwaysShow) box.append(h("button", { type: "button", class: "quiet on", onclick: () => connect(key) }, "Connect " + p.name), dot()); continue; }
+    if (c.status === "needs_reconnect" || c.status === "error" && !c.last_sync_at)
+      box.append(h("button", { type: "button", class: "quiet warn", title: c.last_error || "", onclick: () => connect(key) }, "Reconnect " + p.name), dot());
+    else box.append(h("span", { class: "quiet", title: c.last_error || "", text: p.name + (c.last_error ? " sync problem · " : " synced ") + ago(c.last_sync_at) }), dot());
   }
 }
-async function connectStrava() {
-  const { data, error } = await sb.functions.invoke("strava-start", { body: {} });
-  if (error || !data?.url) { toast(data?.error || "Couldn't start connecting Strava. Try again."); return; }
+async function connect(key) {
+  const { data, error } = await sb.functions.invoke(PROVIDERS[key].start, { body: {} });
+  if (error || !data?.url) { toast(data?.error || "Couldn't start connecting " + PROVIDERS[key].name + ". Try again."); return; }
   location.href = data.url;
 }
-async function syncStrava() {
-  try {
-    const { data } = await sb.functions.invoke("strava-sync", { body: {} });
-    const n = (data?.results || []).reduce((a, r) => a + (r.imported || 0), 0);
-    if (n) await loadEntries(true);
-  } catch { /* the hourly sync will catch up */ }
+async function syncAll() {
+  const { data } = await sb.from("connections").select("provider");
+  const keys = (data || []).map(r => r.provider).filter(k => PROVIDERS[k]);
+  let changed = false;
+  await Promise.all(keys.map(async k => {
+    try {
+      const { data: r } = await sb.functions.invoke(PROVIDERS[k].sync, { body: {} });
+      if ((r?.results || []).some(x => (x.imported || x.entries || 0) > 0)) changed = true;
+    } catch { /* the hourly sync will catch up */ }
+  }));
+  if (changed) await loadEntries(true);
   loadConnections();
 }
 (function handleReturn() {
   const p = new URLSearchParams(location.search);
-  const s = p.get("strava");
-  if (!s) return;
+  const key = p.has("google") ? "google" : p.has("strava") ? "strava" : null;
+  if (!key) return;
+  const s = p.get(key);
+  const name = key === "google" ? "Google Health" : "Strava";
   history.replaceState(null, "", location.pathname);
   const msg = {
-    connected: "Strava connected. Importing your activities…",
-    cancelled: "Strava wasn't connected.",
-    expired: "That took too long. Tap Connect Strava again.",
+    connected: name + " connected. Importing your data…",
+    cancelled: name + " wasn't connected.",
+    expired: "That took too long. Tap Connect " + name + " again.",
     "needs-activity-access": "Strava needs permission to read your activities. Try again and leave that box checked.",
-    failed: "Strava didn't accept the connection. Try again.",
-  }[s] || "Strava: " + s;
+    "not-linked": "Your Google account isn't linked to Google Health yet. Open the Google Health app and sign in with Google, then try again.",
+    "no-refresh-token": "Google didn't grant lasting access. Tap Connect Google Health again.",
+    failed: name + " didn't accept the connection. Try again.",
+  }[s] || name + ": " + s;
   setTimeout(() => toast(msg), 600);
-  if (s === "connected") setTimeout(() => { if (S.user) { loadEntries(true); loadConnections(); } }, 9000);
+  if (s === "connected") setTimeout(() => { if (S.user) { loadEntries(true); loadConnections(); } }, 15000);
 })();
 
 /* ---------- data ---------- */
@@ -401,7 +416,7 @@ document.addEventListener("keydown", e => { if (e.key === "Escape") $("lightbox"
 
 /* refresh when the app comes back to the foreground */
 document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "visible" && S.user && !S.loading && !S.editing) { loadEntries(true); loadConnections(); }
+  if (document.visibilityState === "visible" && S.user && !S.loading && !S.editing) { loadEntries(true); syncAll(); }
 });
 
 /* ---------- boot ---------- */

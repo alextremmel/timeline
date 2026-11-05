@@ -26,6 +26,12 @@ A private, time-stamped personal log: free-text notes and photos in one feed, bu
 - Workouts recorded by Strava and Fitbit reach Apple Health, so both arrive this way
 - The direct Strava functions remain for later but are unscheduled (Strava's API needs a paid subscription)
 
+## Fitbit (Google Health API)
+
+- `supabase/functions/gh-start`, `gh-callback` — connect Google Health (tokens stored server-side in `oauth_tokens`)
+- `supabase/functions/gh-sync` — hourly (pg_cron job `google-health-sync-hourly`) and on app open; pulls sleep, daily resting heart rate, daily HRV, steps and active calories; raw responses kept in `google_raw`
+- Needs Edge Function secrets `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`
+
 ## Files
 
 - `index.html`, `styles.css`, `app.js` — the app

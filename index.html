@@ -20,19 +20,12 @@
 </head>
 <body>
 <div class="wrap">
-  <header class="top">
-    <h1>Timeline of Me</h1>
-    <div class="top-right">
-      <span class="clock" id="clock"></span>
-      <button type="button" class="link" id="signOutBtn" hidden>Sign out</button>
-    </div>
-  </header>
 
-  <!-- Sign in -->
+  <!-- Sign in (first time only) -->
   <section id="signinView" hidden>
     <form class="card signin" id="signinForm" autocomplete="on">
       <h2>Sign in</h2>
-      <p class="muted">Your log is private. Sign in with the account you created for it.</p>
+      <p class="muted">You'll only need to do this once on this phone.</p>
       <label for="email">Email</label>
       <input id="email" type="email" autocomplete="username" inputmode="email" required>
       <label for="password">Password</label>
@@ -45,30 +38,31 @@
   <!-- App -->
   <section id="appView" hidden>
     <form class="card composer" id="composer" autocomplete="off">
-      <div class="edit-flag" id="editFlag" hidden><span>Editing an entry</span><button type="button" class="link" id="cancelEdit">Cancel</button></div>
-      <textarea id="text" placeholder="What's happening? Food, how you feel, a symptom, anything." aria-label="Entry text"></textarea>
-      <div class="chips" id="tagChips" role="group" aria-label="Tags"></div>
-      <div class="extras" id="extras"></div>
+      <div class="edit-flag" id="editFlag" hidden><span>Editing</span><button type="button" class="link" id="cancelEdit">Cancel</button></div>
+      <textarea id="text" placeholder="What's happening?" aria-label="Entry text"></textarea>
       <div class="thumbs" id="thumbs" hidden></div>
+      <div class="when-row" id="whenRow" hidden>
+        <input type="datetime-local" id="whenInput" aria-label="Entry time">
+        <button type="button" class="link" id="whenNow">Use now</button>
+      </div>
       <div class="bar">
-        <label class="tool" for="photoInput">
+        <label class="icon-btn" for="photoInput" aria-label="Add photo">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>
-          Photo
         </label>
         <input id="photoInput" type="file" accept="image/*" multiple hidden>
-        <button type="button" class="tool" id="whenBtn"><span class="when" id="whenLabel">Now</span></button>
-        <button type="submit" class="save" id="saveBtn">Log it</button>
+        <button type="button" class="when-pill" id="whenBtn" aria-label="Change time">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>
+          <span id="whenLabel">Now</span>
+        </button>
+        <button type="submit" class="save" id="saveBtn">Log</button>
       </div>
-      <input type="datetime-local" id="whenInput" hidden aria-label="Entry time">
-      <p class="tip">To talk instead of type, tap the microphone on your iPhone keyboard.</p>
     </form>
-
-    <div class="filters" id="filters" role="group" aria-label="Filter the log"></div>
-    <div class="actions-row"><span id="count"></span><button type="button" class="link" id="copyBtn">Copy last 30 days for AI</button></div>
 
     <div id="status" class="notice" hidden></div>
     <div id="feed"></div>
     <button type="button" class="more" id="moreBtn" hidden>Show older entries</button>
+
+    <footer class="foot"><button type="button" class="quiet" id="signOutBtn">Sign out</button></footer>
   </section>
 </div>
 <div class="toast" id="toast" hidden></div>

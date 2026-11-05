@@ -1,0 +1,14 @@
+{
+  "name": "Timeline of Me",
+  "short_name": "Timeline",
+  "description": "A private, time-stamped log of what I eat, do and feel.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#EDF0EF",
+  "theme_color": "#2C52D6",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}

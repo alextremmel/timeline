@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Timeline of Me</title>
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Timeline">
+<meta name="theme-color" content="#EDF0EF" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0E1412" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png" type="image/png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=Atkinson+Hyperlegible:wght@400;700&family=JetBrains+Mono:wght@500&display=swap">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <h1>Timeline of Me</h1>
+    <div class="top-right">
+      <span class="clock" id="clock"></span>
+      <button type="button" class="link" id="signOutBtn" hidden>Sign out</button>
+    </div>
+  </header>
+
+  <!-- Sign in -->
+  <section id="signinView" hidden>
+    <form class="card signin" id="signinForm" autocomplete="on">
+      <h2>Sign in</h2>
+      <p class="muted">Your log is private. Sign in with the account you created for it.</p>
+      <label for="email">Email</label>
+      <input id="email" type="email" autocomplete="username" inputmode="email" required>
+      <label for="password">Password</label>
+      <input id="password" type="password" autocomplete="current-password" required>
+      <button type="submit" class="save" id="signinBtn">Sign in</button>
+      <p class="error" id="signinError" hidden></p>
+    </form>
+  </section>
+
+  <!-- App -->
+  <section id="appView" hidden>
+    <form class="card composer" id="composer" autocomplete="off">
+      <div class="edit-flag" id="editFlag" hidden><span>Editing an entry</span><button type="button" class="link" id="cancelEdit">Cancel</button></div>
+      <textarea id="text" placeholder="What's happening? Food, how you feel, a symptom, anything." aria-label="Entry text"></textarea>
+      <div class="chips" id="tagChips" role="group" aria-label="Tags"></div>
+      <div class="extras" id="extras"></div>
+      <div class="thumbs" id="thumbs" hidden></div>
+      <div class="bar">
+        <label class="tool" for="photoInput">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>
+          Photo
+        </label>
+        <input id="photoInput" type="file" accept="image/*" multiple hidden>
+        <button type="button" class="tool" id="whenBtn"><span class="when" id="whenLabel">Now</span></button>
+        <button type="submit" class="save" id="saveBtn">Log it</button>
+      </div>
+      <input type="datetime-local" id="whenInput" hidden aria-label="Entry time">
+      <p class="tip">To talk instead of type, tap the microphone on your iPhone keyboard.</p>
+    </form>
+
+    <div class="filters" id="filters" role="group" aria-label="Filter the log"></div>
+    <div class="actions-row"><span id="count"></span><button type="button" class="link" id="copyBtn">Copy last 30 days for AI</button></div>
+
+    <div id="status" class="notice" hidden></div>
+    <div id="feed"></div>
+    <button type="button" class="more" id="moreBtn" hidden>Show older entries</button>
+  </section>
+</div>
+<div class="toast" id="toast" hidden></div>
+<div class="lightbox" id="lightbox" hidden><img alt="" id="lightImg"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.118.0/dist/umd/supabase.js"></script>
+<script src="config.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

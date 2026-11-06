@@ -137,6 +137,19 @@ Deno.serve(async (req) => {
     for (const p of photos || []) photoLinks.set(p.entry_id, [...(photoLinks.get(p.entry_id) || []), photoUrl(p.id)]);
   }
 
+  // Planned workouts: read live from the Exercise calendar (never stored)
+  let planned: any[] = [];
+  try {
+    const r = await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/calendar-upcoming`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ user_id: k.user_id }),
+    });
+    const j = await r.json();
+    if (j?.status === "ok") planned = j.days || [];
+  } catch { /* leave planned empty */ }
+  const weekday = (ymd: string) => new Date(ymd + "T12:00:00Z").toLocaleDateString("en-US", { weekday: "short", timeZone: "UTC" });
+
   const tl = (timeline || []).map((r: any) => ({
     date: r.local_date, day: r.day_of_week, time: r.local_time, timezone: r.timezone, timestamp_utc: r.timestamp_utc,
     source: r.source, kind: r.kind, text: n(r.text), photos: r.photo_count, ...(withPhotoLinks ? { photo_links: photoLinks.get(r.entry_id) || [] } : {}),
@@ -148,7 +161,8 @@ Deno.serve(async (req) => {
       generated_at: new Date().toISOString(), days, since,
       references_note: "Entries link a reference item by writing [[Name]]. Use the version whose from/until dates contain the entry's time. Plain words without [[ ]] do NOT refer to reference items.",
       references,
-      notes: "Times are local to the timezone given. Sleep is listed at wake time and its resting HR/HRV belong to that morning. day_total is Fitbit steps and active calories for a finished day. Workouts carry Fitbit heart rate (avg, max, heartbeats per mile, minute-by-minute) where recorded. Manual notes are free text written by the person (food, mood, symptoms, weight, etc.). weather is the outdoor weather for that day where the person was (°F, inches).",
+      notes: "Times are local to the timezone given. Sleep is listed at wake time and its resting HR/HRV belong to that morning. day_total is Fitbit steps and active calories for a finished day. Workouts carry Fitbit heart rate (avg, max, heartbeats per mile, minute-by-minute) where recorded. Manual notes are free text written by the person (food, mood, symptoms, weight, etc.). weather is the outdoor weather for that day where the person was (°F, inches). planned_next_7_days are plans from the person's Exercise calendar, not things that happened.",
+      planned_next_7_days: planned,
       daily: wantDaily ? daily : undefined, timeline: wantTimeline ? tl : undefined,
     }, null, 2), "application/json");
   }
@@ -177,6 +191,10 @@ Deno.serve(async (req) => {
         lines.push(`  ${v.from} → ${v.until || "now"}${v.name !== r.name ? ` (named "${v.name}")` : ""}: ${(v.description || "(no description)").replace(/\s*\n\s*/g, " / ")}${photo}`);
       }
     }
+  }
+  if (planned.length) {
+    lines.push("", "=== PLANNED (next 7 days, from the person's Exercise calendar; plans, not things that happened) ===");
+    for (const d of planned) for (const ev of d.events) lines.push(`  ${d.date} (${weekday(d.date)}): ${ev.title}${ev.notes ? " — " + ev.notes.replace(/\s*\n\s*/g, " / ") : ""}`);
   }
   if (wantDaily && daily?.length) {
     lines.push("", "=== DAILY SUMMARY ===");

@@ -46,8 +46,16 @@ S.draft = freshDraft();
 /* ---------- scrolling + keyboard ---------- */
 const scroller = $("scroller");
 const shell = $("appView");
-const nearBottom = () => scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 80;
-const toBottom = () => { scroller.scrollTop = scroller.scrollHeight; };
+// "Bottom" is the Now line: planned events sit below it and stay out of view until you scroll down.
+function nowTarget() {
+  const up = $("upcoming");
+  if (up.hidden || !up.firstChild) return scroller.scrollHeight - scroller.clientHeight;
+  const line = up.querySelector(".now-line");
+  const y = scroller.scrollTop + line.getBoundingClientRect().bottom - scroller.getBoundingClientRect().top;
+  return Math.max(0, y - scroller.clientHeight + 8);
+}
+const nearBottom = () => Math.abs(nowTarget() - scroller.scrollTop) < 80;
+const toBottom = () => { scroller.scrollTop = nowTarget(); };
 
 // Keep the app exactly the size of the visible screen so the log box sits right above the keyboard.
 function fitViewport() {
@@ -77,7 +85,7 @@ async function showForSession(session) {
   shell.hidden = !S.user;
   document.body.classList.toggle("app-on", !!S.user);
   if (S.user) fitViewport();
-  if (S.user && !S.loaded) { S.loaded = true; await loadOutbox(); await loadEntries(true); flushOutbox(); syncAll(); loadRefs(); }
+  if (S.user && !S.loaded) { S.loaded = true; await loadOutbox(); await loadEntries(true); flushOutbox(); syncAll(); loadRefs(); loadUpcoming(); }
   if (!S.user) { S.loaded = false; S.entries.clear(); S.urls.clear(); renderFeed(); }
 }
 $("signinForm").addEventListener("submit", async e => {
@@ -127,6 +135,10 @@ async function loadConnections() {
   const line = (label, right) => h("div", { class: "status-line" }, h("span", { text: label }), right);
   const ah = rows.find(r => r.provider === "apple_health");
   box.append(line("Strava (iPhone shortcut)", h("span", { class: "muted", text: ah ? "synced " + ago(ah.last_sync_at) : "not synced yet" })));
+  const calText = { ok: "connected", no_calendar: "no calendar named “Exercise”", error: "couldn't load" }[S.upcomingStatus];
+  if (S.upcomingStatus === "needs_calendar_access" || S.upcomingStatus === "needs_reconnect")
+    box.append(line("Exercise calendar", h("button", { type: "button", class: "link", onclick: () => connect("google_health") }, "Connect")));
+  else if (calText) box.append(line("Exercise calendar", h("span", { class: S.upcomingStatus === "ok" ? "muted" : "warn", text: calText })));
   for (const [key, p] of Object.entries(PROVIDERS)) {
     const c = rows.find(r => r.provider === key);
     if (!c && !p.alwaysShow) continue;
@@ -623,6 +635,46 @@ async function del(e) {
   if (S.editing === e.id) resetComposer();
   renderFeed(); toast("Deleted");
 }
+/* ---------- coming up (Exercise calendar, read live, never saved) ---------- */
+async function loadUpcoming() {
+  let r;
+  try {
+    const { data, error } = await sb.functions.invoke("calendar-upcoming", { body: {} });
+    if (error) return;
+    r = data;
+  } catch { return; }
+  S.upcomingStatus = r?.status || "error";
+  const stick = nearBottom();
+  const top = scroller.scrollTop;
+  renderUpcoming(r?.status === "ok" ? r.days : []);
+  scroller.scrollTop = stick ? nowTarget() : top;
+}
+function renderUpcoming(days) {
+  const up = $("upcoming");
+  const today = dayKey(Date.now());
+  days = (days || []).filter((d) => d.date >= today && d.events?.length);
+  up.replaceChildren();
+  up.hidden = !days.length;
+  if (!days.length) return;
+  up.append(h("div", { class: "now-line", role: "separator" }, "Now"), h("h2", { class: "upcoming-title", text: "Coming up" }));
+  for (const d of days) {
+    const items = h("div", { class: "items" });
+    for (const ev of d.events) {
+      const box = h("div", { class: "box calendar" }, boxHead("CALENDAR", ev.title, ""));
+      items.append(h("div", { class: "item" }, box));
+    }
+    up.append(h("section", { class: "day" }, h("h2", { text: upcomingLabel(d.date) }), items));
+  }
+}
+function upcomingLabel(key) {
+  const tomorrow = dayKey(Date.now() + 864e5);
+  const [y, m, d] = key.split("-").map(Number);
+  const short = new Date(y, m - 1, d).toLocaleDateString([], { weekday: "long", month: "short", day: "numeric" });
+  if (key === dayKey(Date.now())) return "Today · " + short;
+  if (key === tomorrow) return "Tomorrow · " + short;
+  return short;
+}
+
 function renderFeed() {
   const feed = $("feed");
   feed.replaceChildren();
@@ -666,7 +718,7 @@ document.addEventListener("keydown", e => { if (e.key === "Escape") $("lightbox"
 
 /* refresh when the app comes back to the foreground */
 document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "visible" && S.user && !S.loading && !S.editing && !S.searching) { flushOutbox(); loadEntries(true); syncAll(); }
+  if (document.visibilityState === "visible" && S.user && !S.loading && !S.editing && !S.searching) { flushOutbox(); loadEntries(true); syncAll(); loadUpcoming(); }
 });
 
 /* ---------- references ---------- */

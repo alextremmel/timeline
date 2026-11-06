@@ -38,6 +38,13 @@ A private, time-stamped personal log: free-text notes and photos in one feed, bu
 - Every reading is kept in `workout_hr.samples` as `[seconds_from_start, bpm]`; a summary (average, max, min, heartbeats per mile, a 60-point graph line, minute-by-minute averages) is copied into the workout's `entries.details.hr`
 - Status `pending` while Fitbit hasn't synced (retried for 48 h), then `none`; the Strava card shows "Heart rate syncing…" or "No heart rate recorded"
 
+## Coming up (Exercise calendar)
+
+- `supabase/functions/calendar-upcoming` — reads all-day events from the Google Calendar named "Exercise", today through 7 days ahead, live from Google on every call; nothing is stored, so past events simply disappear
+- Uses the Google Health connection with two extra read-only scopes (`calendar.calendarlist.readonly`, `calendar.events.readonly`)
+- The app shows them below a "Now" line in a "Coming up" section (gray CALENDAR cards); the app still opens at the Now line, so you scroll down to see them
+- The AI link includes them as a PLANNED section (`planned_next_7_days` in JSON)
+
 ## Weather
 
 - An evening iPhone automation ("Timeline Location") posts `{"lat", "lon"}` to `health-ingest`; it is rounded to about 1 km and stored in `places` with its time zone and local date

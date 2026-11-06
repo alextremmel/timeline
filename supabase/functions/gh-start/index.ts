@@ -13,6 +13,9 @@ const SCOPES = [
   "https://www.googleapis.com/auth/googlehealth.sleep.readonly",
   "https://www.googleapis.com/auth/googlehealth.health_metrics_and_measurements.readonly",
   "https://www.googleapis.com/auth/googlehealth.activity_and_fitness.readonly",
+  // Read-only: the "Exercise" calendar's planned all-day events, for "Coming up"
+  "https://www.googleapis.com/auth/calendar.calendarlist.readonly",
+  "https://www.googleapis.com/auth/calendar.events.readonly",
 ];
 
 Deno.serve(async (req) => {

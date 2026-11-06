@@ -2,7 +2,7 @@
    the log box is pinned to the bottom and rides up with the keyboard.
    Strava = orange outlined boxes, Fitbit = blue outlined boxes, your own entries = plain rows. */
 :root{
-  --bg:#F3F4F3; --surface:#FFFFFF; --sunk:#EBEDEC; --ink:#15201D; --muted:#5A6865; --faint:#8A9794; --line:#D7DDDB;
+  --bg:#F3F4F3; --surface:#FFFFFF; --sunk:#EBEDEC; --ink:#15201D; --muted:#5A6865; --faint:#8A9794; --line:#D7DDDB; --cal:#B4BDBA;
   --accent:#15201D; --accent-ink:#FFFFFF; --edit:#1967D2; --danger:#B4321F; --scrim:rgba(8,12,11,.9);
   --strava:#E8590C; --strava-ink:#B4400A; --fitbit:#1967D2; --fitbit-ink:#1558B0; --live-line:#A9C6F5;
   --st-awake:#F2994A; --st-rem:#56CCF2; --st-light:#2F80ED; --st-deep:#3D2C8D;
@@ -13,7 +13,7 @@
   color-scheme:light;
 }
 @media (prefers-color-scheme: dark){ :root{
-  --bg:#0E1412; --surface:#171F1C; --sunk:#111816; --ink:#E3EBE8; --muted:#93A39F; --faint:#64726E; --line:#29342F;
+  --bg:#0E1412; --surface:#171F1C; --sunk:#111816; --ink:#E3EBE8; --muted:#93A39F; --faint:#64726E; --line:#29342F; --cal:#4B5652;
   --accent:#E3EBE8; --accent-ink:#0E1412; --edit:#7CA8FF; --danger:#FF8A75;
   --strava:#FF7A3D; --strava-ink:#FF9A66; --fitbit:#5B9BF0; --fitbit-ink:#8DB8F5; --live-line:#2C4A78;
   --st-awake:#F2A35E; --st-rem:#6AD3F5; --st-light:#4A93F0; --st-deep:#7A6AE0;
@@ -216,3 +216,10 @@ mark{background:color-mix(in srgb,var(--st-awake) 45%,transparent);color:inherit
 .hr-graph .hr-line{fill:none;stroke:var(--strava);stroke-width:2;stroke-linejoin:round;stroke-linecap:round;vector-effect:non-scaling-stroke}
 .hr-graph .hr-avg{stroke:var(--muted);stroke-width:1;stroke-dasharray:3 3;opacity:.6;vector-effect:non-scaling-stroke}
 .hr-note{margin:8px 0 0;font-size:.8rem;color:var(--muted)}
+
+/* Coming up: planned all-day events from the Exercise calendar */
+.now-line{display:flex;align-items:center;gap:10px;margin:22px 0 4px;color:var(--muted);font-family:var(--f-display);font-weight:700;font-size:.78rem;letter-spacing:.06em;text-transform:uppercase}
+.now-line::before,.now-line::after{content:"";flex:1;height:1px;background:var(--cal)}
+.upcoming-title{margin:10px 0 0;font-family:var(--f-display);font-weight:700;font-size:.92rem;color:var(--ink)}
+.box.calendar{border-color:var(--cal)}
+.box.calendar .box-title{font-weight:600}

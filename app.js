@@ -439,7 +439,7 @@ async function runSearch(q) {
   S.searchQ = q;
   if (q.length < 2) { S.searchResults = null; renderFeed(); return; }
   const like = "%" + q.replace(/[\\%_]/g, m => "\\" + m) + "%";
-  const { data, error } = await sb.from("entries").select(SELECT).ilike("body", like).order("ts", { ascending: false }).limit(200);
+  const { data, error } = await sb.from("entries").select(SELECT).ilike("body", like).neq("source", "weather").order("ts", { ascending: false }).limit(200);
   if (q !== S.searchQ || !S.searching) return;
   if (error) { toast("Search didn't work. Check your connection."); return; }
   S.searchResults = data || [];
@@ -488,6 +488,13 @@ function dayLabel(key) {
   if (key === today) return "Today · " + short;
   if (key === yest) return "Yesterday · " + short;
   return short;
+}
+function dayHeading(key, w) {
+  const h2 = h("h2", { text: dayLabel(key) });
+  if (w && w.temp_max_f != null && w.temp_min_f != null) {
+    h2.append(h("span", { class: "wx", title: "High / low that day", text: `${Math.round(w.temp_max_f)}° / ${Math.round(w.temp_min_f)}°` }));
+  }
+  return h2;
 }
 const STAGE_COLOR = { AWAKE: "var(--st-awake)", REM: "var(--st-rem)", LIGHT: "var(--st-light)", DEEP: "var(--st-deep)" };
 function clock(sec) {
@@ -613,15 +620,18 @@ function renderFeed() {
     if (S.loading) feed.append(h("div", { class: "empty" }, "Loading your log…"));
     else if (S.user) feed.append(h("div", { class: "empty" }, h("strong", { text: "Nothing logged yet" }), "Type anything below or add a photo, then tap the arrow. The time is stamped for you."));
   } else {
+    // Weather isn't a card: it shows as a small high/low tag next to its day's date.
+    const weather = new Map();
+    for (const e of list) if (e.source === "weather" && e.details?.date) weather.set(e.details.date, e.details);
     let curDay = null, box;
     for (const e of list) {
-      const k = dayKey(e.ts);
+      const k = e.source === "weather" && e.details?.date ? e.details.date : dayKey(e.ts);
       if (k !== curDay) {
         curDay = k;
-        const sec = h("section", { class: "day" }, h("h2", { text: dayLabel(k) }));
+        const sec = h("section", { class: "day" }, dayHeading(k, weather.get(k)));
         box = h("div", { class: "items" }); sec.append(box); feed.append(sec);
       }
-      box.append(renderEntry(e));
+      if (e.source !== "weather") box.append(renderEntry(e));
     }
   }
   $("moreBtn").hidden = S.searching || !S.hasMore || S.loading;

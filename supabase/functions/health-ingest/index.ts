@@ -4,6 +4,9 @@
 //
 // Delivery format (JSON body, each field is text with one record per line):
 //   strava: "Type|Start ISO|End ISO|Value|Unit"   (Walking + Running Distance, Cycling Distance from Strava)
+//
+// Location (from the evening "Timeline Location" automation), used for that day's weather:
+//   {"lat": 40.71, "lon": -74.01}   — rounded to 2 decimals (about 1 km) before it is stored.
 import { createClient } from "npm:@supabase/supabase-js@2.118.0";
 
 const reply = (body: unknown, status = 200) =>
@@ -66,6 +69,40 @@ function stravaEntries(userId: string, text: string) {
   return rows;
 }
 
+/* ---------- evening location, for the weather ---------- */
+function coord(v: unknown) {
+  if (typeof v === "number") return v;
+  if (typeof v !== "string") return NaN;
+  return parseFloat(v.trim().replace(",", "."));
+}
+function readLocation(p: any): { lat: number; lon: number } | null {
+  if (!p || typeof p !== "object") return null;
+  let lat = coord(p.lat ?? p.latitude), lon = coord(p.lon ?? p.lng ?? p.longitude);
+  if ((!isFinite(lat) || !isFinite(lon)) && typeof p.location === "string") {
+    const m = p.location.match(/(-?\d+(?:[.,]\d+)?)\s*[,;]\s*(-?\d+(?:[.,]\d+)?)/);
+    if (m) { lat = coord(m[1]); lon = coord(m[2]); }
+  }
+  if (!isFinite(lat) || !isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180) return null;
+  return { lat: Math.round(lat * 100) / 100, lon: Math.round(lon * 100) / 100 };
+}
+function dateIn(timeZone: string, d = new Date()) {
+  return new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).format(d);
+}
+async function savePlace(admin: any, userId: string, loc: { lat: number; lon: number }) {
+  let timezone = "America/New_York";
+  try {
+    const r = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${loc.lat}&longitude=${loc.lon}&timezone=auto&forecast_days=1&daily=temperature_2m_max`);
+    const j = await r.json();
+    if (typeof j.timezone === "string" && j.timezone) timezone = j.timezone;
+  } catch { /* keep the default */ }
+  const local_date = dateIn(timezone);
+  const { error } = await admin.from("places").insert({ user_id: userId, lat: loc.lat, lon: loc.lon, timezone, local_date });
+  if (error) throw new Error(error.message);
+  const now = new Date().toISOString();
+  await admin.from("connections").upsert({ user_id: userId, provider: "location", status: "connected", last_sync_at: now, last_error: null });
+  return { date: local_date, timezone };
+}
+
 /* ---------- process every delivery not yet turned into entries ---------- */
 async function processPending(admin: any, userId: string) {
   const { data: pending } = await admin.from("health_raw").select("id, payload")
@@ -105,6 +142,18 @@ Deno.serve(async (req) => {
   if (text.length > 5_000_000) return reply({ error: "Too much data in one delivery." }, 413);
   let payload: unknown = null;
   try { payload = JSON.parse(text); } catch { /* keep as text */ }
+
+  // An evening location delivery: store the rounded spot only, nothing else.
+  const loc = readLocation(payload);
+  if (loc && !(payload as any).strava) {
+    try {
+      const place = await savePlace(admin, k.user_id, loc);
+      await admin.from("ingest_keys").update({ last_used_at: new Date().toISOString() }).eq("key_hash", keyHash);
+      return reply({ ok: true, location_saved_for: place.date });
+    } catch {
+      return reply({ error: "Couldn't save the location." }, 500);
+    }
+  }
 
   const { data: row, error } = await admin.from("health_raw").insert({
     user_id: k.user_id, content_type: contentType,

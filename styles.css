@@ -78,6 +78,7 @@ input[type=datetime-local]{border:1px solid var(--line);border-radius:10px;backg
 /* feed */
 .day{margin-top:18px}
 .day h2{font-family:var(--f-display);font-weight:700;font-size:.92rem;color:var(--muted);margin:0 0 8px;text-wrap:balance}
+.day h2 .wx{font-family:var(--f-mono,ui-monospace,monospace);font-weight:500;font-size:.78rem;margin-left:.6em;opacity:.85;white-space:nowrap;font-variant-numeric:tabular-nums}
 .items{display:flex;flex-direction:column;gap:10px}
 .item{min-width:0;border-radius:14px}
 

@@ -34,6 +34,16 @@ function describe(r: any) {
         + (m.speed_mph != null ? `, ${m.speed_mph} mph` : "");
     case "day_total":
       return `day total: ${m.steps ?? "?"} steps, ${m.active_kcal ?? "?"} active kcal`;
+    case "weather":
+      return `weather that day: high ${m.temp_max_f ?? "?"}°F / low ${m.temp_min_f ?? "?"}°F`
+        + (m.condition ? `, ${m.condition}` : "")
+        + (m.humidity_mean_pct != null ? `, humidity ${m.humidity_mean_pct}% (range ${m.humidity_min_pct ?? "?"}–${m.humidity_max_pct ?? "?"}%)` : "")
+        + (m.dew_point_mean_f != null ? `, dew point ${m.dew_point_mean_f}°F` : "")
+        + (m.feels_like_max_f != null ? `, feels like ${m.feels_like_max_f}/${m.feels_like_min_f}°F` : "")
+        + (m.uv_index_max != null ? `, UV max ${m.uv_index_max}` : "")
+        + (m.precipitation_in != null ? `, precipitation ${m.precipitation_in} in` : "")
+        + (m.wind_max_mph != null ? `, wind max ${m.wind_max_mph} mph` : "")
+        + (m.sunshine_hours != null ? `, ${m.sunshine_hours} h sunshine` : "");
     default:
       return (r.text || "").replace(/\s*\n\s*/g, " / ") || "(photo only)";
   }
@@ -85,7 +95,7 @@ Deno.serve(async (req) => {
   const wantDaily = view === "daily" || view === "both", wantTimeline = view === "timeline" || view === "both";
   const [{ data: daily, error: e1 }, { data: timeline, error: e2 }] = await Promise.all([
     wantDaily
-      ? admin.from("ai_daily").select("local_date, day_of_week, sleep_minutes, bedtime_local, wake_local, deep_minutes, rem_minutes, resting_hr_bpm, hrv_ms, steps, active_kcal, workouts, run_walk_miles, bike_miles, workout_list, notes")
+      ? admin.from("ai_daily").select("local_date, day_of_week, sleep_minutes, bedtime_local, wake_local, deep_minutes, rem_minutes, resting_hr_bpm, hrv_ms, steps, active_kcal, workouts, run_walk_miles, bike_miles, workout_list, notes, weather_high_f, weather_low_f, humidity_pct, dew_point_f, uv_index, precipitation_in, weather")
           .eq("user_id", k.user_id).gte("local_date", since).order("local_date")
       : Promise.resolve({ data: [], error: null }),
     wantTimeline
@@ -149,7 +159,7 @@ Deno.serve(async (req) => {
   // Plain text, easiest for any AI to read
   const lines: string[] = [];
   lines.push(`PERSONAL TIMELINE — last ${days} days (from ${since}), generated ${new Date().toISOString()}`);
-  lines.push("Sources: manual = notes and photos the person logged; strava = workouts; fitbit = sleep (listed at wake time, with that morning's resting HR and HRV) and day totals (steps, active calories, at 23:59).");
+  lines.push("Sources: manual = notes and photos the person logged; strava = workouts; fitbit = sleep (listed at wake time, with that morning's resting HR and HRV) and day totals (steps, active calories, at 23:59); weather = outdoor weather for the day where the person was (from their phone's evening location; listed at 23:59; days before weather tracking began have none).");
   lines.push("All times are local (America/New_York unless shown otherwise).");
   if (references.length) {
     lines.push("", "=== REFERENCES ===");
@@ -164,13 +174,14 @@ Deno.serve(async (req) => {
   }
   if (wantDaily && daily?.length) {
     lines.push("", "=== DAILY SUMMARY ===");
-    lines.push("date | day | sleep | bed–wake | deep/REM min | resting HR | HRV ms | steps | active kcal | workouts");
+    lines.push("date | day | sleep | bed–wake | deep/REM min | resting HR | HRV ms | steps | active kcal | workouts | weather hi/lo °F, humidity %, dew point °F");
     for (const d of daily) {
       lines.push([d.local_date, d.day_of_week, hm(d.sleep_minutes) ?? "-",
         d.bedtime_local ? `${d.bedtime_local.slice(11)}–${d.wake_local?.slice(11)}` : "-",
         d.deep_minutes != null ? `${d.deep_minutes}/${d.rem_minutes}` : "-",
         d.resting_hr_bpm ?? "-", d.hrv_ms ?? "-", d.steps ?? "-", d.active_kcal ?? "-",
-        d.workout_list || "-"].join(" | "));
+        d.workout_list || "-",
+        d.weather_high_f != null ? `${Math.round(d.weather_high_f)}/${Math.round(d.weather_low_f)}, ${d.humidity_pct ?? "?"}%, ${d.dew_point_f ?? "?"}` : "-"].join(" | "));
     }
   }
   if (wantTimeline && tl.length) {

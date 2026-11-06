@@ -32,6 +32,12 @@ A private, time-stamped personal log: free-text notes and photos in one feed, bu
 - `supabase/functions/gh-sync` — hourly (pg_cron job `google-health-sync-hourly`) and on app open; pulls sleep, daily resting heart rate, daily HRV, steps and active calories; raw responses kept in `google_raw`
 - Needs Edge Function secrets `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`
 
+## Weather
+
+- An evening iPhone automation ("Timeline Location") posts `{"lat", "lon"}` to `health-ingest`; it is rounded to about 1 km and stored in `places` with its time zone and local date
+- `supabase/functions/weather-sync` — hourly (pg_cron job `weather-sync-hourly`); for each finished day since the first location, looks up that day's weather from Open-Meteo at that evening's location (or the last known one) and saves one `source = 'weather'` entry at 23:59: high/low, feels-like, humidity, dew point, UV, precipitation, wind, sunshine
+- The app shows only the high/low as a small tag beside each date; the AI link and the `ai_daily` view carry the rest (no coordinates)
+
 ## Read-only AI link
 
 - `supabase/functions/ai-export` — `GET /functions/v1/ai-export?key=…` returns the timeline as plain text (default), `format=json` or `format=csv`; `days=N` (default 30), `view=timeline` (default), `daily` or `both`, `photos=links` for 7-day photo links

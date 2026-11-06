@@ -142,7 +142,7 @@ Deno.serve(async (req) => {
       generated_at: new Date().toISOString(), days, since,
       references_note: "Entries link a reference item by writing [[Name]]. Use the version whose from/until dates contain the entry's time. Plain words without [[ ]] do NOT refer to reference items.",
       references,
-      notes: "Times are local to the timezone given. Sleep is listed at wake time and its resting HR/HRV belong to that morning. day_total is Fitbit steps and active calories for a finished day. Manual notes are free text written by the person (food, mood, symptoms, weight, etc.).",
+      notes: "Times are local to the timezone given. Sleep is listed at wake time and its resting HR/HRV belong to that morning. day_total is Fitbit steps and active calories for a finished day. Manual notes are free text written by the person (food, mood, symptoms, weight, etc.). weather is the outdoor weather for that day where the person was (°F, inches).",
       daily: wantDaily ? daily : undefined, timeline: wantTimeline ? tl : undefined,
     }, null, 2), "application/json");
   }

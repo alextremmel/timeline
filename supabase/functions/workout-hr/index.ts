@@ -15,8 +15,15 @@ const RECHECK_MINUTES = 50;      // don't re-ask Google about a pending workout 
 const PER_RUN = 40;              // workouts handled per run
 const GRAPH_POINTS = 60;
 
+// Google Health rejects access tokens that also carry the calendar scopes, so health calls
+// always use a token narrowed to just the health scopes (cached as access_kind = 'health').
+const HEALTH_SCOPES = [
+  "https://www.googleapis.com/auth/googlehealth.sleep.readonly",
+  "https://www.googleapis.com/auth/googlehealth.health_metrics_and_measurements.readonly",
+  "https://www.googleapis.com/auth/googlehealth.activity_and_fitness.readonly",
+];
 async function freshToken(admin: any, row: any) {
-  if (new Date(row.expires_at).getTime() - Date.now() > 120_000) return row.access_token;
+  if (row.access_kind === "health" && new Date(row.expires_at).getTime() - Date.now() > 120_000) return row.access_token;
   const res = await fetch("https://oauth2.googleapis.com/token", {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -25,12 +32,14 @@ async function freshToken(admin: any, row: any) {
       client_secret: Deno.env.get("GOOGLE_CLIENT_SECRET")!,
       refresh_token: row.refresh_token,
       grant_type: "refresh_token",
+      scope: HEALTH_SCOPES.join(" "),
     }),
   });
   if (!res.ok) throw new Error(res.status === 400 || res.status === 401 ? "reconnect" : `token refresh failed (${res.status})`);
   const t = await res.json();
   await admin.from("oauth_tokens").update({
     access_token: t.access_token,
+    access_kind: "health",
     ...(t.refresh_token ? { refresh_token: t.refresh_token } : {}),
     expires_at: new Date(Date.now() + (t.expires_in || 3600) * 1000).toISOString(),
     updated_at: new Date().toISOString(),

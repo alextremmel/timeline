@@ -27,8 +27,9 @@ function addDays(ymd: string, n: number) {
   return d.toISOString().slice(0, 10);
 }
 
-async function freshToken(admin: any, row: any) {
-  if (new Date(row.expires_at).getTime() - Date.now() > 120_000) return row.access_token;
+// A short-lived token narrowed to the calendar scopes. Never cached: the stored token is the
+// health-only one (Google Health rejects tokens that also carry calendar scopes).
+async function calendarToken(row: any) {
   const res = await fetch("https://oauth2.googleapis.com/token", {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -37,17 +38,11 @@ async function freshToken(admin: any, row: any) {
       client_secret: Deno.env.get("GOOGLE_CLIENT_SECRET")!,
       refresh_token: row.refresh_token,
       grant_type: "refresh_token",
+      scope: NEEDED.join(" "),
     }),
   });
   if (!res.ok) throw new Error("reconnect");
-  const t = await res.json();
-  await admin.from("oauth_tokens").update({
-    access_token: t.access_token,
-    ...(t.refresh_token ? { refresh_token: t.refresh_token } : {}),
-    expires_at: new Date(Date.now() + (t.expires_in || 3600) * 1000).toISOString(),
-    updated_at: new Date().toISOString(),
-  }).eq("user_id", row.user_id).eq("provider", "google_health");
-  return t.access_token;
+  return (await res.json()).access_token as string;
 }
 
 async function upcoming(admin: any, userId: string) {
@@ -55,7 +50,7 @@ async function upcoming(admin: any, userId: string) {
   if (!row) return { status: "not_connected", days: [] };
   if (!NEEDED.every((s) => (row.scope || "").includes(s))) return { status: "needs_calendar_access", days: [] };
   let token: string;
-  try { token = await freshToken(admin, row); } catch { return { status: "needs_reconnect", days: [] }; }
+  try { token = await calendarToken(row); } catch { return { status: "needs_reconnect", days: [] }; }
   const auth = { headers: { Authorization: `Bearer ${token}` } };
 
   const lr = await fetch("https://www.googleapis.com/calendar/v3/users/me/calendarList?maxResults=250", auth);

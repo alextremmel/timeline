@@ -40,16 +40,39 @@ Deno.serve(async (req) => {
   const tok = await res.json();
   if (!tok.refresh_token) return back("no-refresh-token");
 
+  // Google Health rejects tokens that also carry calendar scopes, so keep a health-only access token.
+  let healthToken = tok.access_token, healthExpires = tok.expires_in || 3600;
+  const narrowed = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      client_id: Deno.env.get("GOOGLE_CLIENT_ID")!,
+      client_secret: Deno.env.get("GOOGLE_CLIENT_SECRET")!,
+      refresh_token: tok.refresh_token,
+      grant_type: "refresh_token",
+      scope: [
+        "https://www.googleapis.com/auth/googlehealth.sleep.readonly",
+        "https://www.googleapis.com/auth/googlehealth.health_metrics_and_measurements.readonly",
+        "https://www.googleapis.com/auth/googlehealth.activity_and_fitness.readonly",
+      ].join(" "),
+    }),
+  });
+  let kind: string | null = null;
+  if (narrowed.ok) {
+    const n = await narrowed.json();
+    healthToken = n.access_token; healthExpires = n.expires_in || 3600; kind = "health";
+  }
+
   await admin.from("oauth_tokens").upsert({
     user_id: st.user_id, provider: "google_health",
-    access_token: tok.access_token, refresh_token: tok.refresh_token,
-    expires_at: new Date(Date.now() + (tok.expires_in || 3600) * 1000).toISOString(),
+    access_token: healthToken, refresh_token: tok.refresh_token, access_kind: kind,
+    expires_at: new Date(Date.now() + healthExpires * 1000).toISOString(),
     scope: tok.scope || null, updated_at: new Date().toISOString(),
   });
 
   // Check the Google account is linked to Google Health
   const id = await fetch("https://health.googleapis.com/v4/users/me/identity", {
-    headers: { Authorization: `Bearer ${tok.access_token}` },
+    headers: { Authorization: `Bearer ${healthToken}` },
   });
   const linked = id.ok;
   await admin.from("connections").upsert({

@@ -656,7 +656,7 @@ function renderUpcoming(days) {
   up.replaceChildren();
   up.hidden = !days.length;
   if (!days.length) return;
-  up.append(h("div", { class: "now-line", role: "separator" }, "Now"), h("h2", { class: "upcoming-title", text: "Coming up" }));
+  up.append(h("div", { class: "now-line", role: "separator" }, "Now"));
   for (const d of days) {
     const items = h("div", { class: "items" });
     for (const ev of d.events) {

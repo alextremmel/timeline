@@ -220,6 +220,5 @@ mark{background:color-mix(in srgb,var(--st-awake) 45%,transparent);color:inherit
 /* Coming up: planned all-day events from the Exercise calendar */
 .now-line{display:flex;align-items:center;gap:10px;margin:22px 0 4px;color:var(--muted);font-family:var(--f-display);font-weight:700;font-size:.78rem;letter-spacing:.06em;text-transform:uppercase}
 .now-line::before,.now-line::after{content:"";flex:1;height:1px;background:var(--cal)}
-.upcoming-title{margin:10px 0 0;font-family:var(--f-display);font-weight:700;font-size:.92rem;color:var(--ink)}
 .box.calendar{border-color:var(--cal)}
 .box.calendar .box-title{font-weight:600}

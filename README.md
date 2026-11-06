@@ -32,6 +32,12 @@ A private, time-stamped personal log: free-text notes and photos in one feed, bu
 - `supabase/functions/gh-sync` — hourly (pg_cron job `google-health-sync-hourly`) and on app open; pulls sleep, daily resting heart rate, daily HRV, steps and active calories; raw responses kept in `google_raw`
 - Needs Edge Function secrets `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`
 
+## Workout heart rate
+
+- `supabase/functions/workout-hr` — hourly (pg_cron job `workout-hr-hourly`) and right after new Strava workouts arrive; reads Fitbit `heart-rate` samples (about every 2 s) from the Google Health API between each workout's start and end
+- Every reading is kept in `workout_hr.samples` as `[seconds_from_start, bpm]`; a summary (average, max, min, heartbeats per mile, a 60-point graph line, minute-by-minute averages) is copied into the workout's `entries.details.hr`
+- Status `pending` while Fitbit hasn't synced (retried for 48 h), then `none`; the Strava card shows "Heart rate syncing…" or "No heart rate recorded"
+
 ## Weather
 
 - An evening iPhone automation ("Timeline Location") posts `{"lat", "lon"}` to `health-ingest`; it is rounded to about 1 km and stored in `places` with its time zone and local date

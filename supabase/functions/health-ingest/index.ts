@@ -162,6 +162,11 @@ Deno.serve(async (req) => {
   if (error) return reply({ error: "Couldn't store the delivery." }, 500);
 
   const entries = await processPending(admin, k.user_id);
+  // New workouts: look up their Fitbit heart rate in the background.
+  if (entries > 0) {
+    const job = fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/workout-hr`, { method: "POST" }).catch(() => {});
+    try { (globalThis as any).EdgeRuntime?.waitUntil(job); } catch { /* best effort */ }
+  }
 
   const now = new Date().toISOString();
   await admin.from("ingest_keys").update({ last_used_at: now }).eq("key_hash", keyHash);

@@ -522,7 +522,30 @@ function stravaBox(e) {
   const stats = h("div", { class: "stats" }, stat(miles < 10 ? miles.toFixed(2) : miles.toFixed(1), "mi"), stat(clock(secs)));
   if (miles >= 0.1 && secs > 0) stats.append(kind === "Bike" ? stat((miles / (secs / 3600)).toFixed(1), "mph") : stat(clock(secs / miles), "/mi"));
   box.append(boxHead("STRAVA", kind, range), stats);
+  box.append(...hrBits(d.hr));
   return box;
+}
+// Fitbit heart rate during the workout: average, max and a small line graph.
+function hrBits(hr) {
+  if (!hr) return [];
+  if (hr.status === "pending") return [h("p", { class: "hr-note", text: "Heart rate syncing…" })];
+  if (hr.status !== "ok") return [h("p", { class: "hr-note", text: "No heart rate recorded" })];
+  const row = h("div", { class: "vitals hr-row" },
+    stat(String(hr.avg_bpm), "avg HR"), stat(String(hr.max_bpm), "max HR"));
+  const g = Array.isArray(hr.graph) ? hr.graph : [];
+  const vals = g.filter((v) => v != null);
+  if (vals.length < 2) return [row];
+  const lo = Math.min(...vals) - 4, hi = Math.max(...vals) + 4, W = 300, H = 44;
+  const x = (i) => (i / (g.length - 1)) * W, y = (v) => H - ((v - lo) / (hi - lo)) * H;
+  let d = "", pen = false;
+  g.forEach((v, i) => {
+    if (v == null) { pen = false; return; }
+    d += `${pen ? "L" : "M"}${x(i).toFixed(1)},${y(v).toFixed(1)}`; pen = true;
+  });
+  const avgY = y(hr.avg_bpm).toFixed(1);
+  const graph = h("div", { class: "hr-graph", role: "img", "aria-label": `Heart rate during the workout, ${hr.min_bpm} to ${hr.max_bpm} beats per minute` });
+  graph.innerHTML = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none"><line x1="0" x2="${W}" y1="${avgY}" y2="${avgY}" class="hr-avg"/><path d="${d}" class="hr-line"/></svg>`;
+  return [row, graph];
 }
 function sleepBox(e) {
   const d = e.details || {};

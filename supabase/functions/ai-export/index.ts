@@ -1,5 +1,6 @@
 // Read-only export of the timeline for any AI: GET /functions/v1/ai-export?key=SECRET
-// Options: days=30 (1-3650), format=text|json|csv, view=timeline (default)|daily|both|references, photos=links
+// Options: days=30 (1-3650) or from=YYYY-MM-DD&to=YYYY-MM-DD, kind=sleep,workout,note,photo,day_total,weather,nap,
+//   order=newest (default)|oldest, format=text|json|csv, view=timeline (default)|daily|both|references, photos=links
 // A single photo: ?key=…&photo=<id> (the links that photos=links produces)
 // Reference items (linked from entries as [[Name]]) are always included first, with each version's dates.
 // It can only read. The key is checked against a hash in export_keys.
@@ -117,7 +118,16 @@ Deno.serve(async (req) => {
   const format = (url.searchParams.get("format") || "text").toLowerCase();
   const view = (url.searchParams.get("view") || "timeline").toLowerCase();
   const withPhotoLinks = url.searchParams.get("photos") === "links";
-  const since = new Date(Date.now() - days * 86400_000).toISOString().slice(0, 10);
+  const isDate = (v: string | null) => !!v && /^\d{4}-\d{2}-\d{2}$/.test(v);
+  const fromP = url.searchParams.get("from"), toP = url.searchParams.get("to");
+  const since = isDate(fromP) ? fromP! : new Date(Date.now() - days * 86400_000).toISOString().slice(0, 10);
+  const until = isDate(toP) ? toP! : null;
+  const KINDS = ["sleep", "nap", "workout", "day_total", "weather", "note", "photo"];
+  const kinds = (url.searchParams.get("kind") || "").toLowerCase().split(",").map((x) => x.trim()).filter((x) => KINDS.includes(x));
+  // Newest first by default: if a reader cuts a long export short, the oldest days are what get dropped.
+  const newest = (url.searchParams.get("order") || "newest").toLowerCase() !== "oldest";
+  const wantRefs = !kinds.length || kinds.includes("note") || kinds.includes("photo");
+  const wantPlanned = !kinds.length || kinds.includes("workout");
   const base = `${Deno.env.get("SUPABASE_URL")}/functions/v1/ai-export`;
   const photoUrl = (id: string) => `${base}?key=${encodeURIComponent(key)}&photo=${id}`;
 
@@ -125,17 +135,21 @@ Deno.serve(async (req) => {
   const [{ data: daily, error: e1 }, { data: timeline, error: e2 }] = await Promise.all([
     wantDaily
       ? admin.from("ai_daily").select("local_date, day_of_week, sleep_minutes, bedtime_local, wake_local, deep_minutes, rem_minutes, resting_hr_bpm, hrv_ms, steps, active_kcal, workouts, run_walk_miles, bike_miles, workout_list, notes, weather_high_f, weather_low_f, humidity_pct, dew_point_f, uv_index, precipitation_in, weather")
-          .eq("user_id", k.user_id).gte("local_date", since).order("local_date")
+          .eq("user_id", k.user_id).gte("local_date", since).lte("local_date", until || "9999-12-31").order("local_date", { ascending: !newest })
       : Promise.resolve({ data: [], error: null }),
     wantTimeline
-      ? admin.from("ai_timeline").select("entry_id, local_date, day_of_week, local_time, timestamp_utc, timezone, source, kind, text, photo_count, metrics")
-          .eq("user_id", k.user_id).gte("local_date", since).order("timestamp_utc").limit(20000)
+      ? (() => {
+        let q = admin.from("ai_timeline").select("entry_id, local_date, day_of_week, local_time, timestamp_utc, timezone, source, kind, text, photo_count, metrics")
+          .eq("user_id", k.user_id).gte("local_date", since).lte("local_date", until || "9999-12-31");
+        if (kinds.length) q = q.in("kind", kinds);
+        return q.order("timestamp_utc", { ascending: !newest }).limit(20000);
+      })()
       : Promise.resolve({ data: [], error: null }),
   ]);
   if (e1 || e2) return send("Couldn't read the data right now. Try again.", "text/plain", 500);
 
   // Reference items: every version, with the dates it applied
-  const { data: refRows } = await admin.from("ai_references")
+  const { data: refRows } = !wantRefs ? { data: [] as any[] } : await admin.from("ai_references")
     .select("version_id, ref_id, name, description, photo_path, valid_from_local, valid_until_local, archived, archived_at_local")
     .eq("user_id", k.user_id).order("ref_id").order("valid_from_local");
   const refMap = new Map<string, any>();
@@ -162,7 +176,7 @@ Deno.serve(async (req) => {
 
   // Planned workouts: read live from the Exercise calendar (never stored)
   let planned: any[] = [];
-  try {
+  if (wantPlanned) try {
     const r = await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/calendar-upcoming`, {
       method: "POST",
       headers: { Authorization: `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`, "Content-Type": "application/json" },
@@ -181,14 +195,16 @@ Deno.serve(async (req) => {
   }));
 
   if (format === "json") {
+    const compact = tl.map((r: any) => Array.isArray(r.metrics?.stages)
+      ? { ...r, metrics: { ...r.metrics, stages: r.metrics.stages.map((x: any) => `${x.start} ${x.stage} ${x.minutes}m`).join(", ") } } : r);
     return send(JSON.stringify({
-      generated_at: new Date().toISOString(), days, since,
+      generated_at: new Date().toISOString(), days, since, until, order: newest ? "newest first" : "oldest first", kinds: kinds.length ? kinds : "all",
       references_note: "Entries link a reference item by writing [[Name]]. Use the version whose from/until dates contain the entry's time. Plain words without [[ ]] do NOT refer to reference items.",
       references,
-      notes: "Times are local to the timezone given. Sleep is listed at wake time and its resting HR/HRV belong to that morning; metrics.stages is the night's stage sequence (local start time, stage, minutes; blips under 2 min folded in, awake periods kept). day_total is Fitbit steps and active calories for a finished day. Workouts carry Fitbit heart rate (avg, max, heartbeats per mile, minute-by-minute) where recorded. Manual notes are free text written by the person (food, mood, symptoms, weight, etc.). weather is the outdoor weather for that day where the person was (°F, inches). planned_next_7_days are plans from the person's Exercise calendar, not things that happened.",
+      notes: "Times are local to the timezone given. Sleep is listed at wake time and its resting HR/HRV belong to that morning; metrics.stages is the night's stage sequence as text: 'local start time, stage, minutes', blips under 2 min folded in, awake periods kept. day_total is Fitbit steps and active calories for a finished day. Workouts carry Fitbit heart rate (avg, max, heartbeats per mile, minute-by-minute) where recorded. Manual notes are free text written by the person (food, mood, symptoms, weight, etc.). weather is the outdoor weather for that day where the person was (°F, inches). planned_next_7_days are plans from the person's Exercise calendar, not things that happened.",
       planned_next_7_days: planned,
-      daily: wantDaily ? daily : undefined, timeline: wantTimeline ? tl : undefined,
-    }, null, 2), "application/json");
+      daily: wantDaily ? daily : undefined, timeline: wantTimeline ? compact : undefined,
+    }), "application/json");
   }
   if (format === "csv") {
     if (view === "references") {
@@ -202,8 +218,9 @@ Deno.serve(async (req) => {
 
   // Plain text, easiest for any AI to read
   const lines: string[] = [];
-  lines.push(`PERSONAL TIMELINE — last ${days} days (from ${since}), generated ${new Date().toISOString()}`);
-  lines.push("Sources: manual = notes and photos the person logged; strava = workouts (with Fitbit heart rate during the workout where recorded; heartbeats per mile = average HR × minutes ÷ miles, lower at the same pace means fitter); fitbit = sleep (listed at wake time, with that morning's resting HR and HRV, then the night's stages in order as "start time, stage, minutes"; blips under 2 min are folded into the surrounding stage, awake periods always kept) and day totals (steps, active calories, at 23:59); weather = outdoor weather for the day where the person was (from their phone's evening location; listed at 23:59; days before weather tracking began have none).");
+  lines.push(`PERSONAL TIMELINE — ${until ? `${since} to ${until}` : `from ${since}`}${kinds.length ? `, only: ${kinds.join(", ")}` : ""}, ${newest ? "NEWEST FIRST" : "oldest first"}, generated ${new Date().toISOString()}`);
+  lines.push("If this gets cut off, ask for less: add &kind=sleep (or workout, note, photo, day_total, weather), &days=7, or &from=YYYY-MM-DD&to=YYYY-MM-DD; &order=oldest reverses the order.");
+  lines.push("Sources: manual = notes and photos the person logged; strava = workouts (with Fitbit heart rate during the workout where recorded; heartbeats per mile = average HR × minutes ÷ miles, lower at the same pace means fitter); fitbit = sleep (listed at wake time, with that morning's resting HR and HRV, then the night's stages in order as 'start time, stage, minutes'; blips under 2 min are folded into the surrounding stage, awake periods always kept) and day totals (steps, active calories, at 23:59); weather = outdoor weather for the day where the person was (from their phone's evening location; listed at 23:59; days before weather tracking began have none).");
   lines.push("All times are local (America/New_York unless shown otherwise).");
   if (references.length) {
     lines.push("", "=== REFERENCES ===");
@@ -233,7 +250,7 @@ Deno.serve(async (req) => {
     }
   }
   if (wantTimeline && tl.length) {
-    lines.push("", "=== TIMELINE (every entry, in order) ===");
+    lines.push("", "=== TIMELINE (every entry; newest first unless order=oldest) ===");
     let cur = "";
     for (const r of tl) {
       if (r.date !== cur) { cur = r.date; lines.push("", `${r.date} (${r.day})`); }

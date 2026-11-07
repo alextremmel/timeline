@@ -21,13 +21,36 @@ function hm(min: number | null) {
   return `${h}h ${String(m).padStart(2, "0")}m`;
 }
 
+// The night's sleep stages in order, as local times. Blips under 2 minutes are folded into the
+// stage around them (except awake periods, which are always kept), then repeats are joined.
+function stageTimeline(stages: any, tz: string) {
+  if (!Array.isArray(stages) || !stages.length) return [];
+  const segs = stages
+    .map((s: any) => ({ stage: String(s?.[0] || "").toLowerCase(), start: Date.parse(s?.[1]), end: Date.parse(s?.[2]) }))
+    .filter((s: any) => s.stage && isFinite(s.start) && isFinite(s.end) && s.end > s.start)
+    .sort((a: any, b: any) => a.start - b.start);
+  const out: any[] = [];
+  for (const s of segs) {
+    const prev = out[out.length - 1];
+    const short = (s.end - s.start) / 60000 < 2 && s.stage !== "awake";
+    if (prev && (prev.stage === s.stage || short)) { prev.end = Math.max(prev.end, s.end); continue; }
+    out.push({ ...s });
+  }
+  let fmt: Intl.DateTimeFormat;
+  try { fmt = new Intl.DateTimeFormat("en-GB", { timeZone: tz || "America/New_York", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }); }
+  catch { fmt = new Intl.DateTimeFormat("en-GB", { timeZone: "America/New_York", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }); }
+  return out.map((s) => ({ stage: s.stage, start: fmt.format(new Date(s.start)), minutes: Math.round((s.end - s.start) / 60000) }));
+}
+
 function describe(r: any) {
   const m = r.metrics || {};
   switch (r.kind) {
     case "sleep": case "nap":
       return `${r.kind} ${m.bedtime_local?.slice(11)}–${m.wake_local?.slice(11)}, asleep ${m.minutes_asleep} min (${hm(m.minutes_asleep)}): deep ${m.minutes_deep ?? "?"}, REM ${m.minutes_rem ?? "?"}, light ${m.minutes_light ?? "?"}, awake ${m.minutes_awake ?? "?"} min`
         + (m.resting_hr_bpm != null ? `; resting HR ${m.resting_hr_bpm} bpm` : "")
-        + (m.hrv_ms != null ? `; HRV ${m.hrv_ms} ms` : "");
+        + (m.hrv_ms != null ? `; HRV ${m.hrv_ms} ms` : "")
+        + (Array.isArray(m.stages) && m.stages.length
+          ? `\n      stages: ${m.stages.map((x: any) => `${x.start} ${x.stage} ${x.minutes}m`).join(", ")}` : "");
     case "workout":
       return `${m.activity} ${m.start_local?.slice(11)}–${m.end_local?.slice(11)}: ${m.distance_mi} mi in ${m.duration_min} min`
         + (m.pace_min_per_mi != null ? `, pace ${m.pace_min_per_mi} min/mi` : "")
@@ -153,7 +176,8 @@ Deno.serve(async (req) => {
   const tl = (timeline || []).map((r: any) => ({
     date: r.local_date, day: r.day_of_week, time: r.local_time, timezone: r.timezone, timestamp_utc: r.timestamp_utc,
     source: r.source, kind: r.kind, text: n(r.text), photos: r.photo_count, ...(withPhotoLinks ? { photo_links: photoLinks.get(r.entry_id) || [] } : {}),
-    metrics: r.metrics,
+    metrics: (r.kind === "sleep" || r.kind === "nap") && r.metrics
+      ? { ...r.metrics, stages: stageTimeline(r.metrics.stages, r.timezone) } : r.metrics,
   }));
 
   if (format === "json") {
@@ -161,7 +185,7 @@ Deno.serve(async (req) => {
       generated_at: new Date().toISOString(), days, since,
       references_note: "Entries link a reference item by writing [[Name]]. Use the version whose from/until dates contain the entry's time. Plain words without [[ ]] do NOT refer to reference items.",
       references,
-      notes: "Times are local to the timezone given. Sleep is listed at wake time and its resting HR/HRV belong to that morning. day_total is Fitbit steps and active calories for a finished day. Workouts carry Fitbit heart rate (avg, max, heartbeats per mile, minute-by-minute) where recorded. Manual notes are free text written by the person (food, mood, symptoms, weight, etc.). weather is the outdoor weather for that day where the person was (°F, inches). planned_next_7_days are plans from the person's Exercise calendar, not things that happened.",
+      notes: "Times are local to the timezone given. Sleep is listed at wake time and its resting HR/HRV belong to that morning; metrics.stages is the night's stage sequence (local start time, stage, minutes; blips under 2 min folded in, awake periods kept). day_total is Fitbit steps and active calories for a finished day. Workouts carry Fitbit heart rate (avg, max, heartbeats per mile, minute-by-minute) where recorded. Manual notes are free text written by the person (food, mood, symptoms, weight, etc.). weather is the outdoor weather for that day where the person was (°F, inches). planned_next_7_days are plans from the person's Exercise calendar, not things that happened.",
       planned_next_7_days: planned,
       daily: wantDaily ? daily : undefined, timeline: wantTimeline ? tl : undefined,
     }, null, 2), "application/json");
@@ -179,7 +203,7 @@ Deno.serve(async (req) => {
   // Plain text, easiest for any AI to read
   const lines: string[] = [];
   lines.push(`PERSONAL TIMELINE — last ${days} days (from ${since}), generated ${new Date().toISOString()}`);
-  lines.push("Sources: manual = notes and photos the person logged; strava = workouts (with Fitbit heart rate during the workout where recorded; heartbeats per mile = average HR × minutes ÷ miles, lower at the same pace means fitter); fitbit = sleep (listed at wake time, with that morning's resting HR and HRV) and day totals (steps, active calories, at 23:59); weather = outdoor weather for the day where the person was (from their phone's evening location; listed at 23:59; days before weather tracking began have none).");
+  lines.push("Sources: manual = notes and photos the person logged; strava = workouts (with Fitbit heart rate during the workout where recorded; heartbeats per mile = average HR × minutes ÷ miles, lower at the same pace means fitter); fitbit = sleep (listed at wake time, with that morning's resting HR and HRV, then the night's stages in order as "start time, stage, minutes"; blips under 2 min are folded into the surrounding stage, awake periods always kept) and day totals (steps, active calories, at 23:59); weather = outdoor weather for the day where the person was (from their phone's evening location; listed at 23:59; days before weather tracking began have none).");
   lines.push("All times are local (America/New_York unless shown otherwise).");
   if (references.length) {
     lines.push("", "=== REFERENCES ===");

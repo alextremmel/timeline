@@ -636,6 +636,7 @@ const CHECKIN = [
   { key: "mood", label: "Mood", scale: "1 awful · 3 rough · 5 okay · 7 good · 10 great" },
   { key: "skin", label: "Skin", scale: "1 bad breakout · 3 several active spots · 5 a few spots · 7 one or two small spots · 10 completely clear" },
   { key: "soreness", label: "Soreness", scale: "1 very sore · 3 clearly sore · 5 a bit sore · 7 barely noticeable · 10 not sore at all" },
+  { key: "eye", label: "Eye", scale: "Right eye: 1 completely bloodshot · 3 very red · 5 noticeably red · 7 slightly red or dry · 10 completely normal" },
 ];
 function checkinBody(d) {
   const top = "Check-in · " + CHECKIN.map(c => `${c.key} ${d[c.key]?.rating ?? "–"}`).join(" · ");

@@ -65,7 +65,7 @@ function describe(r: any) {
     case "checkin": {
       const part = (label: string, v: any, note: any) => v == null && !note ? null
         : `${label} ${v == null ? "not rated" : v + "/10"}${note ? ` (${String(note).replace(/\s*\n\s*/g, " / ")})` : ""}`;
-      const bits = [part("mood", m.mood, m.mood_note), part("skin", m.skin, m.skin_note), part("soreness", m.soreness, m.soreness_note)].filter(Boolean);
+      const bits = [part("mood", m.mood, m.mood_note), part("skin", m.skin, m.skin_note), part("soreness", m.soreness, m.soreness_note), part("eye", m.eye, m.eye_note)].filter(Boolean);
       return `check-in: ${bits.length ? bits.join("; ") : "no ratings"}${m.note ? `; notes: ${String(m.note).replace(/\s*\n\s*/g, " / ")}` : ""}`;
     }
     case "day_total":
@@ -87,10 +87,11 @@ function describe(r: any) {
 
 // The check-in scales, shown once near the top so every rating can be read correctly.
 const CHECKIN_SCALES = [
-  "Check-ins rate up to three things, each 1–10 where HIGHER IS BETTER. A missing rating means it wasn't rated then (not average, not fine). There can be several check-ins in a day.",
+  "Check-ins rate up to four things, each 1–10 where HIGHER IS BETTER. A missing rating means it wasn't rated then (not average, not fine). There can be several check-ins in a day.",
   "Mood: 1 awful, 3 rough, 5 okay, 7 good, 10 great.",
   "Skin (acne): 1 bad breakout, 3 several active spots, 5 a few spots, 7 one or two small spots, 10 completely clear.",
   "Soreness: 1 very sore, 3 clearly sore, 5 a bit sore, 7 barely noticeable, 10 not sore at all.",
+  "Eye (RIGHT eye only; the person has dry eye and occasional redness in that eye): 1 completely bloodshot, 3 very red, 5 noticeably red, 7 slightly red or dry, 10 completely normal.",
 ];
 
 // Shown at the top of every text and JSON export, so any AI knows how to ask for something else.
@@ -161,7 +162,7 @@ Deno.serve(async (req) => {
   const wantDaily = view === "daily" || view === "both", wantTimeline = view === "timeline" || view === "both";
   const [{ data: daily, error: e1 }, { data: timeline, error: e2 }] = await Promise.all([
     wantDaily
-      ? admin.from("ai_daily").select("local_date, day_of_week, sleep_minutes, bedtime_local, wake_local, deep_minutes, rem_minutes, resting_hr_bpm, hrv_ms, steps, active_kcal, workouts, run_walk_miles, bike_miles, workout_list, notes, weather_high_f, weather_low_f, humidity_pct, dew_point_f, uv_index, precipitation_in, weather, mood, skin, soreness")
+      ? admin.from("ai_daily").select("local_date, day_of_week, sleep_minutes, bedtime_local, wake_local, deep_minutes, rem_minutes, resting_hr_bpm, hrv_ms, steps, active_kcal, workouts, run_walk_miles, bike_miles, workout_list, notes, weather_high_f, weather_low_f, humidity_pct, dew_point_f, uv_index, precipitation_in, weather, mood, skin, soreness, eye")
           .eq("user_id", k.user_id).gte("local_date", since).lte("local_date", until || "9999-12-31").order("local_date", { ascending: !newest })
       : Promise.resolve({ data: [], error: null }),
     wantTimeline
@@ -269,7 +270,7 @@ Deno.serve(async (req) => {
   }
   if (wantDaily && daily?.length) {
     lines.push("", "=== DAILY SUMMARY ===");
-    lines.push("date | day | sleep | bed–wake | deep/REM min | resting HR | HRV ms | steps | active kcal | workouts | weather hi/lo °F, humidity %, dew point °F | check-in avg mood/skin/soreness");
+    lines.push("date | day | sleep | bed–wake | deep/REM min | resting HR | HRV ms | steps | active kcal | workouts | weather hi/lo °F, humidity %, dew point °F | check-in avg mood/skin/soreness/eye");
     for (const d of daily) {
       lines.push([d.local_date, d.day_of_week, hm(d.sleep_minutes) ?? "-",
         d.bedtime_local ? `${d.bedtime_local.slice(11)}–${d.wake_local?.slice(11)}` : "-",
@@ -277,7 +278,7 @@ Deno.serve(async (req) => {
         d.resting_hr_bpm ?? "-", d.hrv_ms ?? "-", d.steps ?? "-", d.active_kcal ?? "-",
         d.workout_list || "-",
         d.weather_high_f != null ? `${Math.round(d.weather_high_f)}/${Math.round(d.weather_low_f)}, ${d.humidity_pct ?? "?"}%, ${d.dew_point_f ?? "?"}` : "-",
-        d.mood != null || d.skin != null || d.soreness != null ? `${d.mood ?? "-"}/${d.skin ?? "-"}/${d.soreness ?? "-"}` : "-"].join(" | "));
+        d.mood != null || d.skin != null || d.soreness != null || d.eye != null ? `${d.mood ?? "-"}/${d.skin ?? "-"}/${d.soreness ?? "-"}/${d.eye ?? "-"}` : "-"].join(" | "));
     }
   }
   if (wantTimeline && tl.length) {

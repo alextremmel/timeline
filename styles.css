@@ -243,5 +243,5 @@ mark{background:color-mix(in srgb,var(--st-awake) 45%,transparent);color:inherit
 .ci-picks{display:grid;grid-template-columns:repeat(10,1fr);gap:4px}
 .ci-picks button{height:40px;border-radius:10px;border:1px solid var(--line);background:var(--surface);color:var(--ink);font-weight:700;font-variant-numeric:tabular-nums;padding:0}
 .ci-picks button[aria-pressed="true"]{background:var(--checkin);border-color:var(--checkin);color:#fff}
-.ci-sec textarea{width:100%;border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:10px 12px;font-size:16px;resize:vertical;color:var(--ink)}
+.ci-sec textarea{width:100%;border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:10px 12px;font-size:16px;line-height:1.4;resize:none;overflow:hidden;min-height:64px;color:var(--ink)}
 .box.checkin{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}

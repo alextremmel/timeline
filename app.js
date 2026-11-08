@@ -694,8 +694,12 @@ function openCheckin(entry) {
   $("checkinTitle").textContent = entry ? "Edit check-in" : "Check-in";
   $("ciSave").textContent = entry ? "Save changes" : "Save check-in";
   $("checkinView").hidden = false;
+  $("checkinView").querySelectorAll("textarea").forEach(growBox);
   $("checkinView").querySelector(".refs-scroll").scrollTop = 0;
 }
+// Check-in note boxes grow with their text instead of scrolling inside.
+function growBox(t) { t.style.height = "auto"; t.style.height = t.scrollHeight + 2 + "px"; }
+$("checkinForm").addEventListener("input", e => { if (e.target.tagName === "TEXTAREA") growBox(e.target); });
 function closeCheckin() { $("checkinView").hidden = true; S.ci = null; }
 $("checkinBtn").onclick = () => openCheckin();
 $("checkinCancel").onclick = closeCheckin;

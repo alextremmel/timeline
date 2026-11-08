@@ -96,6 +96,8 @@ const CHECKIN_SCALES = [
 
 // Shown at the top of every text and JSON export, so any AI knows how to ask for something else.
 const LINK_OPTIONS = [
+  "PLEASE ASK FOR ONLY WHAT YOU NEED. This log is long. If the question is about a certain topic or time period, request just that with the options below instead of reading everything. Prefer several small, precise requests over one big one.",
+  "Good starting points: &view=daily for a compact one-line-per-day overview of trends; &kind=... for one topic (e.g. &kind=sleep); &from=/&to= for a specific stretch of days. Widen only if you need more.",
   "Keep this same link (with its key=...) and add any of these to the end:",
   "&days=N — how many days back (default 30, up to 3650)",
   "&from=YYYY-MM-DD&to=YYYY-MM-DD — an exact date range (use instead of days)",
@@ -249,7 +251,7 @@ Deno.serve(async (req) => {
   // Plain text, easiest for any AI to read
   const lines: string[] = [];
   lines.push(`PERSONAL TIMELINE — ${until ? `${since} to ${until}` : `from ${since}`}${kinds.length ? `, only: ${kinds.join(", ")}` : ""}, ${newest ? "NEWEST FIRST" : "oldest first"}, generated ${new Date().toISOString()}`);
-  lines.push("", "=== LINK OPTIONS (to get different dates or data, or less if this gets cut off) ===", ...LINK_OPTIONS.map((x) => "  " + x), "");
+  lines.push("", "=== HOW TO REQUEST LESS (read this first) ===", ...LINK_OPTIONS.map((x) => "  " + x), "");
   lines.push("Sources: manual = notes and photos the person logged, plus check-ins (ratings, see CHECK-IN SCALES); strava = workouts (with Fitbit heart rate during the workout where recorded; heartbeats per mile = average HR × minutes ÷ miles, lower at the same pace means fitter); fitbit = sleep (listed at wake time, with that morning's resting HR and HRV, then the night's stages in order as 'start time, stage, minutes'; blips under 2 min are folded into the surrounding stage, awake periods always kept) and day totals (steps, active calories, at 23:59); weather = outdoor weather for the day where the person was (from their phone's evening location; listed at 23:59; days before weather tracking began have none).");
   lines.push("All times are local (America/New_York unless shown otherwise).");
   lines.push("", "=== CHECK-IN SCALES ===", ...CHECKIN_SCALES.map((x) => "  " + x));

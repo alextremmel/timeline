@@ -143,6 +143,7 @@ Deno.serve(async (req) => {
       const todo = (workouts || []).filter((w: any) => {
         const k = known.get(w.id);
         if (!k) return true;
+        if (k.status === "ok" && !w.details?.hr) return true; // summary was lost from the card: rebuild it
         if (k.status !== "pending") return false;
         return now - Date.parse(k.checked_at) > RECHECK_MINUTES * 60_000;
       }).slice(0, limit);

@@ -115,6 +115,14 @@ async function processPending(admin: any, userId: string) {
         ...(typeof p.strava === "string" ? stravaEntries(userId, p.strava) : []),
       ];
       if (rows.length) {
+        // The shortcut re-sends recent workouts every time: keep anything added later (like heart rate).
+        const { data: existing } = await admin.from("entries").select("source_id, details")
+          .eq("user_id", userId).eq("source", "strava").in("source_id", rows.map((r) => r.source_id));
+        const prev = new Map((existing || []).map((e: any) => [e.source_id, e.details || {}]));
+        for (const r of rows) {
+          const old = prev.get(r.source_id);
+          if (old?.hr) r.details = { ...r.details, hr: old.hr };
+        }
         const { error } = await admin.from("entries").upsert(rows, { onConflict: "user_id,source,source_id" });
         if (error) throw new Error(error.message);
       }

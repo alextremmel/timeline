@@ -59,7 +59,7 @@ A private, time-stamped personal log: free-text notes and photos in one feed, bu
 
 ## Read-only AI link
 
-- `supabase/functions/ai-export` — `GET /functions/v1/ai-export?key=…` returns the timeline as plain text (default), `format=json` (compact) or `format=csv`; `days=N` (default 30) or `from=`/`to=` dates; `kind=sleep,workout,note,photo,day_total,weather,nap`; `order=newest` (default, so a reader that truncates drops the oldest days) or `oldest`; `view=timeline` (default), `daily` or `both`; `photos=links`
+- `supabase/functions/ai-export` — `GET /functions/v1/ai-export?key=…` alone returns a start page (how to filter, what's in the log via the `ai_overview` view, examples) with no data; add `days`, `from`/`to`, `kind` or `view` to get data. It returns the timeline as plain text (default), `format=json` (compact) or `format=csv`; `days=N` (default 30) or `from=`/`to=` dates; `kind=sleep,workout,note,photo,day_total,weather,nap`; `order=newest` (default, so a reader that truncates drops the oldest days) or `oldest`; `view=timeline` (default), `daily` or `both`; `photos=links`
 - Each night's sleep includes its stage sequence (local start time, stage, minutes; blips under 2 min folded into the surrounding stage, awake periods always kept)
 - Read-only; the secret key's hash lives in `export_keys` (set `revoked_at` to shut a key off)
 - Built on the `ai_timeline` and `ai_daily` views

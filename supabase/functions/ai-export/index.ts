@@ -1,4 +1,5 @@
 // Read-only export of the timeline for any AI: GET /functions/v1/ai-export?key=SECRET
+// The bare link (key only) is a start page: instructions and an overview, no data.
 // Options: days=30 (1-3650) or from=YYYY-MM-DD&to=YYYY-MM-DD, kind=sleep,workout,note,photo,day_total,weather,nap,
 //   order=newest (default)|oldest, format=text|json|csv, view=timeline (default)|daily|both|references, photos=links
 // A single photo: ?key=…&photo=<id> (the links that photos=links produces)
@@ -99,7 +100,7 @@ const LINK_OPTIONS = [
   "PLEASE ASK FOR ONLY WHAT YOU NEED. This log is long. If the question is about a certain topic or time period, request just that with the options below instead of reading everything. Prefer several small, precise requests over one big one.",
   "Good starting points: &view=daily for a compact one-line-per-day overview of trends; &kind=... for one topic (e.g. &kind=sleep); &from=/&to= for a specific stretch of days. Widen only if you need more.",
   "Keep this same link (with its key=...) and add any of these to the end:",
-  "&days=N — how many days back (default 30, up to 3650)",
+  "&days=N — the last N days (up to 3650; if you give other options but no dates, the last 30 days)",
   "&from=YYYY-MM-DD&to=YYYY-MM-DD — an exact date range (use instead of days)",
   "&kind=sleep — only some kinds of entries; any of: sleep, nap, workout, day_total, weather, note, photo, checkin (comma-separated, e.g. &kind=sleep,checkin)",
   "&order=oldest — oldest first (default is newest first, so a cut-off export loses the oldest days)",
@@ -108,6 +109,8 @@ const LINK_OPTIONS = [
   "&photos=links — adds a link for each photo; open a photo link to see the image",
   "Example: add &kind=sleep&days=90 for three months of sleep only.",
 ];
+
+const SOURCES_NOTE = "Sources: manual = notes and photos the person logged, plus check-ins (ratings, see CHECK-IN SCALES); strava = workouts (with Fitbit heart rate during the workout where recorded; heartbeats per mile = average HR × minutes ÷ miles, lower at the same pace means fitter); fitbit = sleep (listed at wake time, with that morning's resting HR and HRV, then the night's stages in order as 'start time, stage, minutes'; blips under 2 min are folded into the surrounding stage, awake periods always kept) and day totals (steps, active calories, at 23:59); weather = outdoor weather for the day where the person was (from their phone's evening location; listed at 23:59; days before weather tracking began have none).";
 
 function csvCell(v: unknown) {
   if (v === null || v === undefined) return "";
@@ -144,8 +147,39 @@ Deno.serve(async (req) => {
     return new Response(file, { headers: { ...HEADERS, "Content-Type": "image/jpeg" } });
   }
 
-  const days = Math.min(3650, Math.max(1, parseInt(url.searchParams.get("days") || "30", 10) || 30));
   const format = (url.searchParams.get("format") || "text").toLowerCase();
+  // The bare link (only the key) returns instructions and an overview of what's in the log, no data,
+  // so an AI can pick a small, precise request before downloading anything.
+  if (!["days", "from", "to", "kind", "view"].some((p) => url.searchParams.has(p))) {
+    const { data: rows } = await admin.from("ai_overview").select("kind, entries, first_date, last_date").eq("user_id", k.user_id);
+    const ORDER = ["sleep", "nap", "workout", "day_total", "weather", "checkin", "note", "photo"];
+    const overview = (rows || []).sort((a: any, b: any) => ORDER.indexOf(a.kind) - ORDER.indexOf(b.kind))
+      .map((r: any) => ({ kind: r.kind, entries: r.entries, first: r.first_date, last: r.last_date }));
+    const examples = [
+      "&view=daily&days=30 — one line per day for the last month (best first look for trends)",
+      "&days=3 — everything from the last 3 days",
+      "&kind=sleep&days=14 — just sleep, last two weeks",
+      "&kind=checkin,weather&days=60 — check-in ratings next to the weather, last two months",
+      "&kind=workout&from=2026-10-01&to=2026-10-31 — workouts in one month",
+      "&view=references — only the reference items ([[Name]] definitions)",
+    ];
+    const intro = "This is the START PAGE: it has no log data yet. Add options to the end of this same link to get data. Ask for only what the question needs.";
+    if (format === "json") {
+      return send(JSON.stringify({ start_page: intro, link_options: LINK_OPTIONS, examples, whats_in_the_log: overview, checkin_scales: CHECKIN_SCALES, sources: SOURCES_NOTE }), "application/json");
+    }
+    const out = [
+      "PERSONAL TIMELINE — START PAGE (no data yet)", intro,
+      "", "=== WHAT'S IN THE LOG ===",
+      ...overview.map((o) => `  ${o.kind}: ${o.entries} entries, ${o.first} to ${o.last}`),
+      "", "=== HOW TO REQUEST DATA ===", ...LINK_OPTIONS.map((x) => "  " + x),
+      "", "=== EXAMPLES (add to the end of this link) ===", ...examples.map((x) => "  " + x),
+      "", "=== WHAT THE DATA MEANS ===", "  " + SOURCES_NOTE,
+      "", "=== CHECK-IN SCALES ===", ...CHECKIN_SCALES.map((x) => "  " + x),
+    ];
+    return send(out.join("\n") + "\n", "text/plain");
+  }
+
+  const days = Math.min(3650, Math.max(1, parseInt(url.searchParams.get("days") || "30", 10) || 30));
   const view = (url.searchParams.get("view") || "timeline").toLowerCase();
   const withPhotoLinks = url.searchParams.get("photos") === "links";
   const isDate = (v: string | null) => !!v && /^\d{4}-\d{2}-\d{2}$/.test(v);
@@ -252,7 +286,7 @@ Deno.serve(async (req) => {
   const lines: string[] = [];
   lines.push(`PERSONAL TIMELINE — ${until ? `${since} to ${until}` : `from ${since}`}${kinds.length ? `, only: ${kinds.join(", ")}` : ""}, ${newest ? "NEWEST FIRST" : "oldest first"}, generated ${new Date().toISOString()}`);
   lines.push("", "=== HOW TO REQUEST LESS (read this first) ===", ...LINK_OPTIONS.map((x) => "  " + x), "");
-  lines.push("Sources: manual = notes and photos the person logged, plus check-ins (ratings, see CHECK-IN SCALES); strava = workouts (with Fitbit heart rate during the workout where recorded; heartbeats per mile = average HR × minutes ÷ miles, lower at the same pace means fitter); fitbit = sleep (listed at wake time, with that morning's resting HR and HRV, then the night's stages in order as 'start time, stage, minutes'; blips under 2 min are folded into the surrounding stage, awake periods always kept) and day totals (steps, active calories, at 23:59); weather = outdoor weather for the day where the person was (from their phone's evening location; listed at 23:59; days before weather tracking began have none).");
+  lines.push(SOURCES_NOTE);
   lines.push("All times are local (America/New_York unless shown otherwise).");
   lines.push("", "=== CHECK-IN SCALES ===", ...CHECKIN_SCALES.map((x) => "  " + x));
   if (references.length) {

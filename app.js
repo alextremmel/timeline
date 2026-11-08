@@ -649,20 +649,43 @@ async function loadUpcoming() {
   renderUpcoming(r?.status === "ok" ? r.days : []);
   scroller.scrollTop = stick ? nowTarget() : top;
 }
+function calendarItem(ev) {
+  return h("div", { class: "item" }, h("div", { class: "box calendar" }, boxHead("CALENDAR", ev.title, "")));
+}
+// Today's plan sits inside today's section, right after the night's sleep card (or at the top).
+function placeTodayPlans() {
+  document.querySelectorAll(".today-plan").forEach((el) => el.remove());
+  const plans = S.todayPlans || [];
+  if (!plans.length || S.searching) return;
+  const sec = document.querySelector(`#feed section.day[data-day="${dayKey(Date.now())}"]`);
+  if (!sec) return;
+  const items = sec.querySelector(".items");
+  const sleeps = items.querySelectorAll("[data-sleep]");
+  let after = sleeps.length ? sleeps[sleeps.length - 1] : null;
+  for (const ev of plans) {
+    const el = calendarItem(ev);
+    el.classList.add("today-plan");
+    if (after) after.after(el); else items.prepend(el);
+    after = el;
+  }
+}
 function renderUpcoming(days) {
   const up = $("upcoming");
   const today = dayKey(Date.now());
   days = (days || []).filter((d) => d.date >= today && d.events?.length);
+  // Today's plans go in today's section above the Now line, unless today has no section yet.
+  const todayDay = days.find((d) => d.date === today);
+  const hasTodaySection = !!document.querySelector(`#feed section.day[data-day="${today}"]`);
+  S.todayPlans = todayDay && hasTodaySection ? todayDay.events : [];
+  if (S.todayPlans.length) days = days.filter((d) => d.date !== today);
+  placeTodayPlans();
   up.replaceChildren();
   up.hidden = !days.length;
   if (!days.length) return;
   up.append(h("div", { class: "now-line", role: "separator" }, "Now"));
   for (const d of days) {
     const items = h("div", { class: "items" });
-    for (const ev of d.events) {
-      const box = h("div", { class: "box calendar" }, boxHead("CALENDAR", ev.title, ""));
-      items.append(h("div", { class: "item" }, box));
-    }
+    for (const ev of d.events) items.append(calendarItem(ev));
     up.append(h("section", { class: "day" }, h("h2", { text: upcomingLabel(d.date) }), items));
   }
 }
@@ -704,11 +727,17 @@ function renderFeed() {
       if (k !== curDay) {
         curDay = k;
         const sec = h("section", { class: "day" }, dayHeading(k, weather.get(k)));
+        sec.dataset.day = k;
         box = h("div", { class: "items" }); sec.append(box); feed.append(sec);
       }
-      if (e.source !== "weather") box.append(renderEntry(e));
+      if (e.source !== "weather") {
+        const el = renderEntry(e);
+        if (e.details?.kind === "sleep") el.dataset.sleep = "1";
+        box.append(el);
+      }
     }
   }
+  placeTodayPlans();
   $("moreBtn").hidden = S.searching || !S.hasMore || S.loading;
   S.lastAdded = null;
 }

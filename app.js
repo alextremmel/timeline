@@ -360,7 +360,7 @@ const outbox = (() => {
   return { put: o => run("readwrite", st => st.put(o)), del: id => run("readwrite", st => st.delete(id)), all: () => run("readonly", st => st.getAll()) };
 })();
 function pendingEntry(item) {
-  return { id: item.id, ts: item.row.ts, tz: item.row.tz, body: item.row.body, source: "me", details: {}, pending: true,
+  return { id: item.id, ts: item.row.ts, tz: item.row.tz, body: item.row.body, source: "me", details: item.row.details || {}, pending: true,
     entry_photos: item.photos.map(p => ({ id: p.id, preview: p.preview || (p.preview = URL.createObjectURL(p.blob)) })) };
 }
 async function loadOutbox() {
@@ -373,10 +373,14 @@ async function queueNew(text) {
     row: { id, ts: new Date(S.draft.whenMs ?? Date.now()).toISOString(), tz: Intl.DateTimeFormat().resolvedOptions().timeZone, body: text || null },
     photos: S.draft.photos.filter(p => p.blob).map(p => ({ id: uuid(), blob: p.blob, w: p.w, h: p.h })),
   };
+  resetComposer();
+  await queueItem(item);
+}
+async function queueItem(item) {
   try { await outbox.put({ ...item, photos: item.photos.map(({ preview, ...rest }) => rest) }); } catch { /* kept in memory for this session */ }
-  S.pending.set(id, item);
-  S.lastAdded = id;
-  resetComposer(); renderFeed(); toBottom();
+  S.pending.set(item.id, item);
+  S.lastAdded = item.id;
+  renderFeed(); toBottom();
   flushOutbox(true);
 }
 const already = e => e && (e.code === "23505" || /duplicate|already exists/i.test(e.message || "") || e.statusCode === "409");
@@ -595,6 +599,8 @@ function renderEntry(e) {
   if (e.source === "google_health") { li.append(e.details?.kind === "day" ? dayBox(e) : sleepBox(e)); return li; }
   if (e.source && e.source !== "me") { li.append(h("div", { class: "box" }, boxHead((SOURCE_LABEL[e.source] || e.source).toUpperCase(), "", fmtTime(e.ts)), h("p", { class: "body", text: e.body || "" }))); return li; }
 
+  if (e.details?.kind === "checkin") return checkinEntry(e, li);
+
   // your own entry: time · text · small photos on the right
   // tap = log again, press and hold = edit / delete
   const photos = e.entry_photos || [];
@@ -625,6 +631,103 @@ function renderEntry(e) {
   }
   return li;
 }
+/* ---------- check-in: mood, skin, soreness (each optional, 1–10, higher is better) ---------- */
+const CHECKIN = [
+  { key: "mood", label: "Mood", scale: "1 awful · 3 rough · 5 okay · 7 good · 10 great" },
+  { key: "skin", label: "Skin", scale: "1 bad breakout · 3 several active spots · 5 a few spots · 7 one or two small spots · 10 completely clear" },
+  { key: "soreness", label: "Soreness", scale: "1 very sore · 3 clearly sore · 5 a bit sore · 7 barely noticeable · 10 not sore at all" },
+];
+function checkinBody(d) {
+  const top = "Check-in · " + CHECKIN.map(c => `${c.key} ${d[c.key]?.rating ?? "–"}`).join(" · ");
+  const lines = CHECKIN.filter(c => d[c.key]?.note).map(c => `${c.label}: ${d[c.key].note}`);
+  if (d.note) lines.push(`Notes: ${d.note}`);
+  return [top, ...lines].join("\n");
+}
+function checkinEntry(e, li) {
+  const d = e.details;
+  const rows = h("div", { class: "ci-rows" }, CHECKIN.filter(c => d[c.key]?.rating != null || d[c.key]?.note).map(c =>
+    h("div", { class: "ci-row" },
+      h("span", { class: "ci-k", text: c.label }),
+      h("span", { class: "ci-v" + (d[c.key]?.rating == null ? " blank" : ""), text: d[c.key]?.rating == null ? "–" : `${d[c.key].rating}/10` }),
+      h("span", { class: "ci-n", text: d[c.key]?.note || "" }))));
+  const box = h("div", { class: "box checkin" + (e.pending ? " pending" : "") }, boxHead("CHECK-IN", "", fmtTime(e.ts)), rows);
+  if (d.note) box.append(h("p", { class: "ci-extra", text: d.note }));
+  if (!e.pending) pressable(box, () => {}, () => { S.openId = e.id; S.confirmId = null; renderFeed(); });
+  li.append(box);
+  if (e.pending) li.append(h("div", { class: "pending-note", text: S.flushing ? "Sending…" : "Saved on your phone · waiting to send" }));
+  if (S.openId === e.id && !e.pending) {
+    li.append(S.confirmId === e.id
+      ? h("div", { class: "entry-tools" },
+          h("span", { text: "Delete this check-in?" }),
+          h("button", { type: "button", class: "yes", onclick: () => del(e) }, "Delete"),
+          h("button", { type: "button", onclick: () => { S.confirmId = null; renderFeed(); } }, "Keep"))
+      : h("div", { class: "entry-tools" },
+          h("button", { type: "button", onclick: () => { S.openId = null; openCheckin(e); } }, "Edit"),
+          h("button", { type: "button", class: "danger", onclick: () => { S.confirmId = e.id; renderFeed(); } }, "Delete"),
+          h("button", { type: "button", onclick: () => { S.openId = null; renderFeed(); } }, "Done")));
+  }
+  return li;
+}
+const localInput = (t) => { const d = new Date(t); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 16); };
+function openCheckin(entry) {
+  closeSheet();
+  S.ci = { editId: entry?.id || null, ratings: {} };
+  const d = entry?.details || {};
+  const wrap = $("ciSections"); wrap.replaceChildren();
+  for (const c of CHECKIN) {
+    S.ci.ratings[c.key] = d[c.key]?.rating ?? null;
+    const picks = h("div", { class: "ci-picks", role: "group", "aria-label": `${c.label} rating, 1 to 10` });
+    for (let n = 1; n <= 10; n++) {
+      picks.append(h("button", { type: "button", "aria-pressed": String(S.ci.ratings[c.key] === n), onclick: () => {
+        S.ci.ratings[c.key] = S.ci.ratings[c.key] === n ? null : n; // tap the same number again to clear it
+        picks.querySelectorAll("button").forEach((b, i) => b.setAttribute("aria-pressed", String(S.ci.ratings[c.key] === i + 1)));
+      } }, String(n)));
+    }
+    const note = h("textarea", { id: `ci_${c.key}`, rows: "2", placeholder: "Notes (optional)" });
+    note.value = d[c.key]?.note || "";
+    wrap.append(h("div", { class: "ci-sec" },
+      h("span", { class: "ci-name", text: c.label }), h("p", { class: "ci-scale", text: c.scale }), picks, note));
+  }
+  $("ciNote").value = d.note || "";
+  $("ciWhen").value = localInput(entry ? entry.ts : Date.now());
+  $("checkinTitle").textContent = entry ? "Edit check-in" : "Check-in";
+  $("ciSave").textContent = entry ? "Save changes" : "Save check-in";
+  $("checkinView").hidden = false;
+  $("checkinView").querySelector(".refs-scroll").scrollTop = 0;
+}
+function closeCheckin() { $("checkinView").hidden = true; S.ci = null; }
+$("checkinBtn").onclick = () => openCheckin();
+$("checkinCancel").onclick = closeCheckin;
+$("checkinForm").addEventListener("submit", async ev => {
+  ev.preventDefault();
+  const details = { kind: "checkin", version: 1 };
+  let any = false;
+  for (const c of CHECKIN) {
+    const rating = S.ci.ratings[c.key], note = $(`ci_${c.key}`).value.trim() || null;
+    details[c.key] = { rating, note };
+    if (rating != null || note) any = true;
+  }
+  details.note = $("ciNote").value.trim() || null;
+  if (details.note) any = true;
+  if (!any) { toast("Pick a number or write a note first."); return; }
+  const when = $("ciWhen").value ? new Date($("ciWhen").value) : new Date();
+  const row = { ts: (isNaN(when) ? new Date() : when).toISOString(), tz: Intl.DateTimeFormat().resolvedOptions().timeZone, body: checkinBody(details), details };
+  if (S.ci.editId) {
+    const btn = $("ciSave"); btn.disabled = true;
+    try {
+      const { error } = await sb.from("entries").update(row).eq("id", S.ci.editId);
+      if (error) throw error;
+      await reloadOne(S.ci.editId);
+      closeCheckin(); renderFeed(); toast("Saved");
+    } catch { toast(navigator.onLine === false ? "You're offline. Edits need a connection." : "Couldn't save. Try again."); }
+    finally { btn.disabled = false; }
+    return;
+  }
+  const id = uuid();
+  closeCheckin();
+  await queueItem({ id, userId: S.user.id, createdAt: Date.now(), row: { id, ...row }, photos: [] });
+});
+
 async function del(e) {
   S.confirmId = null; S.openId = null;
   const paths = (e.entry_photos || []).map(p => p.path);

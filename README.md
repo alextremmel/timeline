@@ -38,6 +38,12 @@ A private, time-stamped personal log: free-text notes and photos in one feed, bu
 - Every reading is kept in `workout_hr.samples` as `[seconds_from_start, bpm]`; a summary (average, max, min, heartbeats per mile, a 60-point graph line, minute-by-minute averages) is copied into the workout's `entries.details.hr`
 - Status `pending` while Fitbit hasn't synced (retried for 48 h), then `none`; the Strava card shows "Heart rate syncing…" or "No heart rate recorded"
 
+## Check-ins
+
+- ⋯ → Check-in opens its own screen: Mood, Skin, Soreness, each an optional 1–10 rating (higher is better; tap the same number again to clear it) plus a note, and an "Anything else" note. Any number of check-ins per day.
+- Saved as a normal entry (`source = 'me'`, `details.kind = 'checkin'`, ratings and notes in `details`) through the same offline outbox; press and hold a check-in card to edit or delete it
+- `ai_timeline` gives it kind `checkin`; `ai_daily` averages the day's ratings (`mood`, `skin`, `soreness`); the AI link prints the scales once at the top
+
 ## Coming up (Exercise calendar)
 
 - `supabase/functions/calendar-upcoming` — reads all-day events from the Google Calendar named "Exercise", today through 7 days ahead, live from Google on every call; nothing is stored, so past events simply disappear

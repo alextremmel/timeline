@@ -119,9 +119,34 @@
   <div class="refs-foot" id="refsFoot"><button type="button" class="save-btn" id="refAdd">Add reference</button></div>
 </section>
 
+<!-- Check-in: its own screen, ratings optional -->
+<section class="refs-view" id="checkinView" hidden aria-label="Check-in">
+  <div class="refs-scroll">
+    <div class="col">
+      <div class="refs-head">
+        <h2 id="checkinTitle">Check-in</h2>
+        <button type="button" class="link" id="checkinCancel">Cancel</button>
+      </div>
+      <p class="refs-intro">Rate any of these 1–10 (higher is better), add a note, or leave it blank.</p>
+      <form id="checkinForm" class="ci-form" autocomplete="off">
+        <div class="ci-when"><label for="ciWhen">Time</label><input id="ciWhen" type="datetime-local"></div>
+        <div id="ciSections"></div>
+        <div class="ci-sec">
+          <label class="ci-name" for="ciNote">Anything else</label>
+          <textarea id="ciNote" rows="2" placeholder="Optional"></textarea>
+        </div>
+      </form>
+    </div>
+  </div>
+  <div class="refs-foot"><button type="submit" form="checkinForm" class="save-btn" id="ciSave">Save check-in</button></div>
+</section>
+
 <div class="sheet-backdrop" id="sheetBackdrop" hidden></div>
 <div class="sheet" id="sheet" role="dialog" aria-modal="true" aria-label="More options" hidden>
   <div class="sheet-grip" aria-hidden="true"></div>
+  <button type="button" class="sheet-item" id="checkinBtn">
+    <span class="sheet-title">Check-in</span><span class="sheet-sub">Mood, skin and soreness, any time of day</span>
+  </button>
   <button type="button" class="sheet-item" id="syncStravaBtn">
     <span class="sheet-title">Sync Strava</span><span class="sheet-sub">Runs your Timeline Health shortcut</span>
   </button>

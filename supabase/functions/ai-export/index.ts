@@ -62,6 +62,12 @@ function describe(r: any) {
             + (Array.isArray(m.hr_by_minute) && m.hr_by_minute.length ? `; HR by minute: ${m.hr_by_minute.map((v: any) => v ?? "-").join(",")}` : "")
           : m.heart_rate_status === "pending" ? "; heart rate not synced yet"
           : m.heart_rate_status === "none" ? "; no heart rate recorded" : "");
+    case "checkin": {
+      const part = (label: string, v: any, note: any) => v == null && !note ? null
+        : `${label} ${v == null ? "not rated" : v + "/10"}${note ? ` (${String(note).replace(/\s*\n\s*/g, " / ")})` : ""}`;
+      const bits = [part("mood", m.mood, m.mood_note), part("skin", m.skin, m.skin_note), part("soreness", m.soreness, m.soreness_note)].filter(Boolean);
+      return `check-in: ${bits.length ? bits.join("; ") : "no ratings"}${m.note ? `; notes: ${String(m.note).replace(/\s*\n\s*/g, " / ")}` : ""}`;
+    }
     case "day_total":
       return `day total: ${m.steps ?? "?"} steps, ${m.active_kcal ?? "?"} active kcal`;
     case "weather":
@@ -79,12 +85,20 @@ function describe(r: any) {
   }
 }
 
+// The check-in scales, shown once near the top so every rating can be read correctly.
+const CHECKIN_SCALES = [
+  "Check-ins rate up to three things, each 1–10 where HIGHER IS BETTER. A missing rating means it wasn't rated then (not average, not fine). There can be several check-ins in a day.",
+  "Mood: 1 awful, 3 rough, 5 okay, 7 good, 10 great.",
+  "Skin (acne): 1 bad breakout, 3 several active spots, 5 a few spots, 7 one or two small spots, 10 completely clear.",
+  "Soreness: 1 very sore, 3 clearly sore, 5 a bit sore, 7 barely noticeable, 10 not sore at all.",
+];
+
 // Shown at the top of every text and JSON export, so any AI knows how to ask for something else.
 const LINK_OPTIONS = [
   "Keep this same link (with its key=...) and add any of these to the end:",
   "&days=N — how many days back (default 30, up to 3650)",
   "&from=YYYY-MM-DD&to=YYYY-MM-DD — an exact date range (use instead of days)",
-  "&kind=sleep — only some kinds of entries; any of: sleep, nap, workout, day_total, weather, note, photo (comma-separated, e.g. &kind=sleep,workout)",
+  "&kind=sleep — only some kinds of entries; any of: sleep, nap, workout, day_total, weather, note, photo, checkin (comma-separated, e.g. &kind=sleep,checkin)",
   "&order=oldest — oldest first (default is newest first, so a cut-off export loses the oldest days)",
   "&view=daily — one summary line per day instead of every entry; also view=both or view=references",
   "&format=json or &format=csv — instead of this plain text",
@@ -135,7 +149,7 @@ Deno.serve(async (req) => {
   const fromP = url.searchParams.get("from"), toP = url.searchParams.get("to");
   const since = isDate(fromP) ? fromP! : new Date(Date.now() - days * 86400_000).toISOString().slice(0, 10);
   const until = isDate(toP) ? toP! : null;
-  const KINDS = ["sleep", "nap", "workout", "day_total", "weather", "note", "photo"];
+  const KINDS = ["sleep", "nap", "workout", "day_total", "weather", "note", "photo", "checkin"];
   const kinds = (url.searchParams.get("kind") || "").toLowerCase().split(",").map((x) => x.trim()).filter((x) => KINDS.includes(x));
   // Newest first by default: if a reader cuts a long export short, the oldest days are what get dropped.
   const newest = (url.searchParams.get("order") || "newest").toLowerCase() !== "oldest";
@@ -147,7 +161,7 @@ Deno.serve(async (req) => {
   const wantDaily = view === "daily" || view === "both", wantTimeline = view === "timeline" || view === "both";
   const [{ data: daily, error: e1 }, { data: timeline, error: e2 }] = await Promise.all([
     wantDaily
-      ? admin.from("ai_daily").select("local_date, day_of_week, sleep_minutes, bedtime_local, wake_local, deep_minutes, rem_minutes, resting_hr_bpm, hrv_ms, steps, active_kcal, workouts, run_walk_miles, bike_miles, workout_list, notes, weather_high_f, weather_low_f, humidity_pct, dew_point_f, uv_index, precipitation_in, weather")
+      ? admin.from("ai_daily").select("local_date, day_of_week, sleep_minutes, bedtime_local, wake_local, deep_minutes, rem_minutes, resting_hr_bpm, hrv_ms, steps, active_kcal, workouts, run_walk_miles, bike_miles, workout_list, notes, weather_high_f, weather_low_f, humidity_pct, dew_point_f, uv_index, precipitation_in, weather, mood, skin, soreness")
           .eq("user_id", k.user_id).gte("local_date", since).lte("local_date", until || "9999-12-31").order("local_date", { ascending: !newest })
       : Promise.resolve({ data: [], error: null }),
     wantTimeline
@@ -212,10 +226,11 @@ Deno.serve(async (req) => {
       ? { ...r, metrics: { ...r.metrics, stages: r.metrics.stages.map((x: any) => `${x.start} ${x.stage} ${x.minutes}m`).join(", ") } } : r);
     return send(JSON.stringify({
       link_options: LINK_OPTIONS,
+      checkin_scales: CHECKIN_SCALES,
       generated_at: new Date().toISOString(), days, since, until, order: newest ? "newest first" : "oldest first", kinds: kinds.length ? kinds : "all",
       references_note: "Entries link a reference item by writing [[Name]]. Use the version whose from/until dates contain the entry's time. Plain words without [[ ]] do NOT refer to reference items.",
       references,
-      notes: "Times are local to the timezone given. Sleep is listed at wake time and its resting HR/HRV belong to that morning; metrics.stages is the night's stage sequence as text: 'local start time, stage, minutes', blips under 2 min folded in, awake periods kept. day_total is Fitbit steps and active calories for a finished day. Workouts carry Fitbit heart rate (avg, max, heartbeats per mile, minute-by-minute) where recorded. Manual notes are free text written by the person (food, mood, symptoms, weight, etc.). weather is the outdoor weather for that day where the person was (°F, inches). planned_next_7_days are plans from the person's Exercise calendar, not things that happened.",
+      notes: "Times are local to the timezone given. Sleep is listed at wake time and its resting HR/HRV belong to that morning; metrics.stages is the night's stage sequence as text: 'local start time, stage, minutes', blips under 2 min folded in, awake periods kept. day_total is Fitbit steps and active calories for a finished day. Workouts carry Fitbit heart rate (avg, max, heartbeats per mile, minute-by-minute) where recorded. Manual notes are free text written by the person (food, mood, symptoms, weight, etc.); checkin entries carry 1–10 ratings described in checkin_scales. weather is the outdoor weather for that day where the person was (°F, inches). planned_next_7_days are plans from the person's Exercise calendar, not things that happened.",
       planned_next_7_days: planned,
       daily: wantDaily ? daily : undefined, timeline: wantTimeline ? compact : undefined,
     }), "application/json");
@@ -234,8 +249,9 @@ Deno.serve(async (req) => {
   const lines: string[] = [];
   lines.push(`PERSONAL TIMELINE — ${until ? `${since} to ${until}` : `from ${since}`}${kinds.length ? `, only: ${kinds.join(", ")}` : ""}, ${newest ? "NEWEST FIRST" : "oldest first"}, generated ${new Date().toISOString()}`);
   lines.push("", "=== LINK OPTIONS (to get different dates or data, or less if this gets cut off) ===", ...LINK_OPTIONS.map((x) => "  " + x), "");
-  lines.push("Sources: manual = notes and photos the person logged; strava = workouts (with Fitbit heart rate during the workout where recorded; heartbeats per mile = average HR × minutes ÷ miles, lower at the same pace means fitter); fitbit = sleep (listed at wake time, with that morning's resting HR and HRV, then the night's stages in order as 'start time, stage, minutes'; blips under 2 min are folded into the surrounding stage, awake periods always kept) and day totals (steps, active calories, at 23:59); weather = outdoor weather for the day where the person was (from their phone's evening location; listed at 23:59; days before weather tracking began have none).");
+  lines.push("Sources: manual = notes and photos the person logged, plus check-ins (ratings, see CHECK-IN SCALES); strava = workouts (with Fitbit heart rate during the workout where recorded; heartbeats per mile = average HR × minutes ÷ miles, lower at the same pace means fitter); fitbit = sleep (listed at wake time, with that morning's resting HR and HRV, then the night's stages in order as 'start time, stage, minutes'; blips under 2 min are folded into the surrounding stage, awake periods always kept) and day totals (steps, active calories, at 23:59); weather = outdoor weather for the day where the person was (from their phone's evening location; listed at 23:59; days before weather tracking began have none).");
   lines.push("All times are local (America/New_York unless shown otherwise).");
+  lines.push("", "=== CHECK-IN SCALES ===", ...CHECKIN_SCALES.map((x) => "  " + x));
   if (references.length) {
     lines.push("", "=== REFERENCES ===");
     lines.push("Entries link these by writing [[Name]]. Use the version whose dates contain the entry's time. Plain words without [[ ]] do NOT refer to these.");
@@ -253,14 +269,15 @@ Deno.serve(async (req) => {
   }
   if (wantDaily && daily?.length) {
     lines.push("", "=== DAILY SUMMARY ===");
-    lines.push("date | day | sleep | bed–wake | deep/REM min | resting HR | HRV ms | steps | active kcal | workouts | weather hi/lo °F, humidity %, dew point °F");
+    lines.push("date | day | sleep | bed–wake | deep/REM min | resting HR | HRV ms | steps | active kcal | workouts | weather hi/lo °F, humidity %, dew point °F | check-in avg mood/skin/soreness");
     for (const d of daily) {
       lines.push([d.local_date, d.day_of_week, hm(d.sleep_minutes) ?? "-",
         d.bedtime_local ? `${d.bedtime_local.slice(11)}–${d.wake_local?.slice(11)}` : "-",
         d.deep_minutes != null ? `${d.deep_minutes}/${d.rem_minutes}` : "-",
         d.resting_hr_bpm ?? "-", d.hrv_ms ?? "-", d.steps ?? "-", d.active_kcal ?? "-",
         d.workout_list || "-",
-        d.weather_high_f != null ? `${Math.round(d.weather_high_f)}/${Math.round(d.weather_low_f)}, ${d.humidity_pct ?? "?"}%, ${d.dew_point_f ?? "?"}` : "-"].join(" | "));
+        d.weather_high_f != null ? `${Math.round(d.weather_high_f)}/${Math.round(d.weather_low_f)}, ${d.humidity_pct ?? "?"}%, ${d.dew_point_f ?? "?"}` : "-",
+        d.mood != null || d.skin != null || d.soreness != null ? `${d.mood ?? "-"}/${d.skin ?? "-"}/${d.soreness ?? "-"}` : "-"].join(" | "));
     }
   }
   if (wantTimeline && tl.length) {

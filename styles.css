@@ -2,7 +2,7 @@
    the log box is pinned to the bottom and rides up with the keyboard.
    Strava = orange outlined boxes, Fitbit = blue outlined boxes, your own entries = plain rows. */
 :root{
-  --bg:#F3F4F3; --surface:#FFFFFF; --sunk:#EBEDEC; --ink:#15201D; --muted:#5A6865; --faint:#8A9794; --line:#D7DDDB; --cal:#B4BDBA;
+  --bg:#F3F4F3; --surface:#FFFFFF; --sunk:#EBEDEC; --ink:#15201D; --muted:#5A6865; --faint:#8A9794; --line:#D7DDDB; --cal:#B4BDBA; --checkin:#7C5CBF;
   --accent:#15201D; --accent-ink:#FFFFFF; --edit:#1967D2; --danger:#B4321F; --scrim:rgba(8,12,11,.9);
   --strava:#E8590C; --strava-ink:#B4400A; --fitbit:#1967D2; --fitbit-ink:#1558B0; --live-line:#A9C6F5;
   --st-awake:#F2994A; --st-rem:#56CCF2; --st-light:#2F80ED; --st-deep:#3D2C8D;
@@ -13,7 +13,7 @@
   color-scheme:light;
 }
 @media (prefers-color-scheme: dark){ :root{
-  --bg:#0E1412; --surface:#171F1C; --sunk:#111816; --ink:#E3EBE8; --muted:#93A39F; --faint:#64726E; --line:#29342F; --cal:#4B5652;
+  --bg:#0E1412; --surface:#171F1C; --sunk:#111816; --ink:#E3EBE8; --muted:#93A39F; --faint:#64726E; --line:#29342F; --cal:#4B5652; --checkin:#A68BE3;
   --accent:#E3EBE8; --accent-ink:#0E1412; --edit:#7CA8FF; --danger:#FF8A75;
   --strava:#FF7A3D; --strava-ink:#FF9A66; --fitbit:#5B9BF0; --fitbit-ink:#8DB8F5; --live-line:#2C4A78;
   --st-awake:#F2A35E; --st-rem:#6AD3F5; --st-light:#4A93F0; --st-deep:#7A6AE0;
@@ -222,3 +222,26 @@ mark{background:color-mix(in srgb,var(--st-awake) 45%,transparent);color:inherit
 .now-line::before,.now-line::after{content:"";flex:1;height:1px;background:var(--cal)}
 .box.calendar{border-color:var(--cal)}
 .box.calendar .box-title{font-weight:600}
+
+/* Check-in */
+.box.checkin{border-color:var(--checkin)}
+.box.checkin .box-label{color:var(--checkin)}
+.ci-rows{display:flex;flex-direction:column;gap:6px;margin-top:6px}
+.ci-row{display:grid;grid-template-columns:5.2em auto 1fr;gap:8px;align-items:baseline}
+.ci-row .ci-k{color:var(--muted);font-size:.85rem}
+.ci-row .ci-v{font-family:var(--f-mono,ui-monospace,monospace);font-weight:600;font-variant-numeric:tabular-nums}
+.ci-row .ci-v.blank{color:var(--faint);font-weight:500}
+.ci-row .ci-n{min-width:0;overflow-wrap:anywhere}
+.ci-extra{margin:8px 0 0;overflow-wrap:anywhere}
+.ci-form{display:flex;flex-direction:column;gap:18px;margin-top:10px}
+.ci-when{display:flex;align-items:center;gap:10px}
+.ci-when label{color:var(--muted);font-size:.85rem}
+.ci-when input{border:1px solid var(--line);border-radius:10px;background:var(--surface);padding:6px 8px;font-size:16px;color:var(--ink)}
+.ci-sec{display:flex;flex-direction:column;gap:8px}
+.ci-name{font-family:var(--f-display);font-weight:800;font-size:1.1rem;color:var(--ink)}
+.ci-scale{margin:0;font-size:.8rem;color:var(--muted);line-height:1.4}
+.ci-picks{display:grid;grid-template-columns:repeat(10,1fr);gap:4px}
+.ci-picks button{height:40px;border-radius:10px;border:1px solid var(--line);background:var(--surface);color:var(--ink);font-weight:700;font-variant-numeric:tabular-nums;padding:0}
+.ci-picks button[aria-pressed="true"]{background:var(--checkin);border-color:var(--checkin);color:#fff}
+.ci-sec textarea{width:100%;border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:10px 12px;font-size:16px;resize:vertical;color:var(--ink)}
+.box.checkin{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}

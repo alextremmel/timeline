@@ -635,21 +635,32 @@ function renderEntry(e) {
 const CHECKIN = [
   { key: "mood", label: "Mood", scale: "1 awful · 3 rough · 5 okay · 7 good · 10 great" },
   { key: "skin", label: "Skin", scale: "1 bad breakout · 3 several active spots · 5 a few spots · 7 one or two small spots · 10 completely clear" },
-  { key: "soreness", label: "Soreness", scale: "1 very sore · 3 clearly sore · 5 a bit sore · 7 barely noticeable · 10 not sore at all" },
+  { key: "soreness", label: "Soreness", scale: "1 very sore · 3 clearly sore · 5 a bit sore · 7 barely noticeable · 10 not sore at all",
+    parts: [{ key: "upper", label: "Upper body" }, { key: "lower", label: "Lower body" }] },
   { key: "eye", label: "Eye", scale: "Right eye: 1 completely bloodshot · 3 very red · 5 noticeably red · 7 slightly red or dry · 10 completely normal" },
 ];
+// Most items have one rating ("rating"); soreness has two (upper and lower body).
+const ciParts = c => c.parts || [{ key: "rating", label: null }];
+const ciRated = (d, c) => ciParts(c).some(p => d[c.key]?.[p.key] != null);
 function checkinBody(d) {
-  const top = "Check-in · " + CHECKIN.map(c => `${c.key} ${d[c.key]?.rating ?? "–"}`).join(" · ");
+  const top = "Check-in · " + CHECKIN.map(c => c.parts
+    ? `${c.key} ${c.parts.map(p => `${p.key} ${d[c.key]?.[p.key] ?? "–"}`).join(" · ")}`
+    : `${c.key} ${d[c.key]?.rating ?? "–"}`).join(" · ");
   const lines = CHECKIN.filter(c => d[c.key]?.note).map(c => `${c.label}: ${d[c.key].note}`);
   if (d.note) lines.push(`Notes: ${d.note}`);
   return [top, ...lines].join("\n");
 }
 function checkinEntry(e, li) {
   const d = e.details;
-  const rows = h("div", { class: "ci-rows" }, CHECKIN.filter(c => d[c.key]?.rating != null || d[c.key]?.note).map(c =>
+  const valueText = c => {
+    if (!c.parts) return d[c.key]?.rating == null ? "–" : `${d[c.key].rating}/10`;
+    const rated = c.parts.filter(p => d[c.key]?.[p.key] != null);
+    return rated.length ? rated.map(p => `${p.key} ${d[c.key][p.key]}/10`).join(" · ") : "–";
+  };
+  const rows = h("div", { class: "ci-rows" }, CHECKIN.filter(c => ciRated(d, c) || d[c.key]?.note).map(c =>
     h("div", { class: "ci-row" },
       h("span", { class: "ci-k", text: c.label }),
-      h("span", { class: "ci-v" + (d[c.key]?.rating == null ? " blank" : ""), text: d[c.key]?.rating == null ? "–" : `${d[c.key].rating}/10` }),
+      h("span", { class: "ci-v" + (ciRated(d, c) ? "" : " blank"), text: valueText(c) }),
       h("span", { class: "ci-n", text: d[c.key]?.note || "" }))));
   const box = h("div", { class: "box checkin" + (e.pending ? " pending" : "") }, boxHead("CHECK-IN", "", fmtTime(e.ts)), rows);
   if (d.note) box.append(h("p", { class: "ci-extra", text: d.note }));
@@ -676,18 +687,24 @@ function openCheckin(entry) {
   const d = entry?.details || {};
   const wrap = $("ciSections"); wrap.replaceChildren();
   for (const c of CHECKIN) {
-    S.ci.ratings[c.key] = d[c.key]?.rating ?? null;
-    const picks = h("div", { class: "ci-picks", role: "group", "aria-label": `${c.label} rating, 1 to 10` });
-    for (let n = 1; n <= 10; n++) {
-      picks.append(h("button", { type: "button", "aria-pressed": String(S.ci.ratings[c.key] === n), onclick: () => {
-        S.ci.ratings[c.key] = S.ci.ratings[c.key] === n ? null : n; // tap the same number again to clear it
-        picks.querySelectorAll("button").forEach((b, i) => b.setAttribute("aria-pressed", String(S.ci.ratings[c.key] === i + 1)));
-      } }, String(n)));
+    const sec = h("div", { class: "ci-sec" }, h("span", { class: "ci-name", text: c.label }), h("p", { class: "ci-scale", text: c.scale }));
+    for (const part of ciParts(c)) {
+      const id = `${c.key}.${part.key}`;
+      S.ci.ratings[id] = d[c.key]?.[part.key] ?? null;
+      const picks = h("div", { class: "ci-picks", role: "group", "aria-label": `${part.label || c.label} rating, 1 to 10` });
+      for (let n = 1; n <= 10; n++) {
+        picks.append(h("button", { type: "button", "aria-pressed": String(S.ci.ratings[id] === n), onclick: () => {
+          S.ci.ratings[id] = S.ci.ratings[id] === n ? null : n; // tap the same number again to clear it
+          picks.querySelectorAll("button").forEach((b, i) => b.setAttribute("aria-pressed", String(S.ci.ratings[id] === i + 1)));
+        } }, String(n)));
+      }
+      if (part.label) sec.append(h("span", { class: "ci-part", text: part.label }));
+      sec.append(picks);
     }
     const note = h("textarea", { id: `ci_${c.key}`, rows: "2", placeholder: "Notes (optional)" });
     note.value = d[c.key]?.note || "";
-    wrap.append(h("div", { class: "ci-sec" },
-      h("span", { class: "ci-name", text: c.label }), h("p", { class: "ci-scale", text: c.scale }), picks, note));
+    sec.append(note);
+    wrap.append(sec);
   }
   $("ciNote").value = d.note || "";
   $("ciWhen").value = localInput(entry ? entry.ts : Date.now());
@@ -705,12 +722,13 @@ $("checkinBtn").onclick = () => openCheckin();
 $("checkinCancel").onclick = closeCheckin;
 $("checkinForm").addEventListener("submit", async ev => {
   ev.preventDefault();
-  const details = { kind: "checkin", version: 1 };
+  const details = { kind: "checkin", version: 2 };
   let any = false;
   for (const c of CHECKIN) {
-    const rating = S.ci.ratings[c.key], note = $(`ci_${c.key}`).value.trim() || null;
-    details[c.key] = { rating, note };
-    if (rating != null || note) any = true;
+    const item = { note: $(`ci_${c.key}`).value.trim() || null };
+    for (const part of ciParts(c)) item[part.key] = S.ci.ratings[`${c.key}.${part.key}`];
+    details[c.key] = item;
+    if (ciRated(details, c) || item.note) any = true;
   }
   details.note = $("ciNote").value.trim() || null;
   if (details.note) any = true;

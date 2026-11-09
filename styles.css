@@ -245,3 +245,4 @@ mark{background:color-mix(in srgb,var(--st-awake) 45%,transparent);color:inherit
 .ci-picks button[aria-pressed="true"]{background:var(--checkin);border-color:var(--checkin);color:#fff}
 .ci-sec textarea{width:100%;border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:10px 12px;font-size:16px;line-height:1.4;resize:none;overflow:hidden;min-height:64px;color:var(--ink)}
 .box.checkin{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+.ci-part{font-size:.85rem;font-weight:600;color:var(--muted);margin-top:2px}

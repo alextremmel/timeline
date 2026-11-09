@@ -40,9 +40,9 @@ A private, time-stamped personal log: free-text notes and photos in one feed, bu
 
 ## Check-ins
 
-- ⋯ → Check-in opens its own screen: Mood, Skin, Soreness, Eye (right eye redness), each an optional 1–10 rating (higher is better; tap the same number again to clear it) plus a note, and an "Anything else" note. Any number of check-ins per day.
+- ⋯ → Check-in opens its own screen: Mood, Skin, Soreness (separate upper- and lower-body ratings, one note), Eye (right eye redness), each an optional 1–10 rating (higher is better; tap the same number again to clear it) plus a note, and an "Anything else" note. Any number of check-ins per day.
 - Saved as a normal entry (`source = 'me'`, `details.kind = 'checkin'`, ratings and notes in `details`) through the same offline outbox; press and hold a check-in card to edit or delete it
-- `ai_timeline` gives it kind `checkin`; `ai_daily` averages the day's ratings (`mood`, `skin`, `soreness`, `eye`); the AI link prints the scales once at the top
+- `ai_timeline` gives it kind `checkin`; `ai_daily` averages the day's ratings (`mood`, `skin`, `soreness_upper`, `soreness_lower`, `eye`); single soreness ratings from before 2026-11-09 were moved to lower body; the AI link prints the scales once at the top
 
 ## Coming up (Exercise calendar)
 

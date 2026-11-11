@@ -146,20 +146,33 @@ async function buildEntries(admin: any, userId: string) {
   }
 
   const rows: any[] = [];
-  // Sleep: one entry at wake-up time, with that morning's resting HR and HRV
+  // The longest sleep that ends on each date is that night's main sleep. Fitbit sometimes marks a
+  // daytime nap as a "main sleep" too, so naps are worked out here rather than trusted.
+  const longest = new Map<string, { key: string; min: number }>();
+  for (const [key, p] of sleeps) {
+    const iv = p.sleep?.interval;
+    if (!iv?.endTime) continue;
+    const w = localDate(iv.endTime, iv.endUtcOffset), min = Number(p.sleep.summary?.minutesAsleep || 0);
+    if (min > (longest.get(w)?.min ?? -1)) longest.set(w, { key, min });
+  }
+  // Sleep: one entry at wake-up time; only the night's main sleep carries that morning's resting HR and HRV
   for (const [key, p] of sleeps) {
     const s = p.sleep, iv = s.interval || {}, sum = s.summary || {};
     if (!iv.startTime || !iv.endTime) continue;
     const wakeDate = localDate(iv.endTime, iv.endUtcOffset);
     const stage = (t: string) => Number((sum.stagesSummary || []).find((x: any) => x.type === t)?.minutes || 0);
     const asleep = Number(sum.minutesAsleep || 0);
-    const main = s.metadata?.mainSleep !== false;
+    const isLongest = longest.get(wakeDate)?.key === key;
+    const startHour = new Date(new Date(iv.startTime).getTime() + offsetSec(iv.startUtcOffset) * 1000).getUTCHours();
+    // A shorter sleep that starts in the daytime is a nap; a shorter one at night is part of a split night.
+    const main = s.metadata?.mainSleep !== false && (isLongest || !(startHour >= 9 && startHour < 19));
+    const withVitals = main && isLongest;
     const line1 = `${main ? "Sleep" : "Nap"} · ${hm(asleep)} asleep (${clockAt(iv.startTime, iv.startUtcOffset)}–${clockAt(iv.endTime, iv.endUtcOffset)})`;
     const stageBits = [["Deep", "DEEP"], ["REM", "REM"], ["Light", "LIGHT"], ["Awake", "AWAKE"]]
       .filter(([, t]) => stage(t) > 0).map(([label, t]) => `${label} ${hm(stage(t))}`);
     const vitals: string[] = [];
-    if (main && rhr.has(wakeDate)) vitals.push(`resting HR ${rhr.get(wakeDate)}`);
-    if (main && hrv.has(wakeDate)) vitals.push(`HRV ${Math.round(hrv.get(wakeDate).averageHeartRateVariabilityMilliseconds)} ms`);
+    if (withVitals && rhr.has(wakeDate)) vitals.push(`resting HR ${rhr.get(wakeDate)}`);
+    if (withVitals && hrv.has(wakeDate)) vitals.push(`HRV ${Math.round(hrv.get(wakeDate).averageHeartRateVariabilityMilliseconds)} ms`);
     rows.push({
       user_id: userId, ts: iv.endTime, tz, source: "google_health",
       source_id: `sleep:${String(key).split("/").pop()}`,
@@ -170,14 +183,14 @@ async function buildEntries(admin: any, userId: string) {
         minutes_asleep: asleep, minutes_awake: Number(sum.minutesAwake || 0), minutes_in_period: Number(sum.minutesInSleepPeriod || 0),
         stages_minutes: Object.fromEntries((sum.stagesSummary || []).map((x: any) => [x.type.toLowerCase(), Number(x.minutes)])),
         stages: (s.stages || []).map((x: any) => [x.type, x.startTime, x.endTime]),
-        resting_hr: main ? rhr.get(wakeDate) ?? null : null,
-        hrv: main ? hrv.get(wakeDate) ?? null : null,
+        resting_hr: withVitals ? rhr.get(wakeDate) ?? null : null,
+        hrv: withVitals ? hrv.get(wakeDate) ?? null : null,
         device: p.dataSource?.device?.displayName || null,
       },
     });
   }
   // Days with resting HR / HRV but no sleep record still get those numbers in the day total
-  const sleepDates = new Set(rows.filter((r) => r.details.kind === "sleep").map((r) => r.details.wake_date));
+  const sleepDates = new Set(rows.filter((r) => r.details.resting_hr != null || r.details.hrv != null).map((r) => r.details.wake_date));
 
   // Day totals for finished days, placed at 11:59 PM
   const today = new Intl.DateTimeFormat("en-CA", { timeZone: tz }).format(new Date());

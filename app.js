@@ -661,7 +661,7 @@ function checkinEntry(e, li) {
     h("div", { class: "ci-row" },
       h("span", { class: "ci-k", text: c.label }),
       h("span", { class: "ci-v" + (ciRated(d, c) ? "" : " blank"), text: valueText(c) }),
-      h("span", { class: "ci-n", text: d[c.key]?.note || "" }))));
+      d[c.key]?.note ? h("span", { class: "ci-n", text: d[c.key].note }) : null)));
   const box = h("div", { class: "box checkin" + (e.pending ? " pending" : "") }, boxHead("CHECK-IN", "", fmtTime(e.ts)), rows);
   if (d.note) box.append(h("p", { class: "ci-extra", text: d.note }));
   if (!e.pending) pressable(box, () => {}, () => { S.openId = e.id; S.confirmId = null; renderFeed(); });

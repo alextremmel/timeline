@@ -77,6 +77,9 @@ A private, time-stamped personal log: free-text notes and photos in one feed, bu
 - `manifest.webmanifest`, `icons/` — home-screen icon and app settings
 
 ## Graphs
-⋯ menu → **Graphs** (look-only, nothing is entered here).
-- **Trends:** resting HR, HRV, mood, skin, soreness (upper and lower) and eye, stacked on one shared time axis. It shows the last 3 months by default; use 1M/6M/1Y to change the range and ‹ › to move back or forward in time. Touch and drag across any chart to read every chart on the same day. Check-in dots are single check-ins, and the line joins each day's average.
-- **Workouts:** runs and rides as separate scatter plots. Each dot sits at the workout's average heart rate (across) and pace or speed (up = faster). The faint bar shows the middle 80% of that workout's minute-by-minute heart rate (turn it off with **HR spread**). Bigger dots are longer workouts and faded dots are older ones. Tap a dot to see its stats and heart rate curve.
+⋯ menu → **Graphs** (look-only). Runs and rides each get a scatter plot. Every dot is one workout, placed at its average heart rate (across) and pace or speed (up = faster).
+- **Colour = when:** pale dots are older and deep ones newer; the key under the chart marks the months. The outlined dot is the latest.
+- **Size = distance.**
+- **Monthly trail:** a ◆ marks each month's average (months with at least 2 workouts), with arrows from month to month. Up and to the left means faster at the same or lower heart rate.
+- **HR spread:** the faint bar covers the middle 80% of that workout's minute-by-minute heart rate.
+- Tap a dot to see its stats and heart rate curve.

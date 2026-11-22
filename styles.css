@@ -252,7 +252,7 @@ mark{background:color-mix(in srgb,var(--st-awake) 45%,transparent);color:inherit
 .g-tabs{margin:12px 0 14px;background:var(--sunk);border-radius:12px;padding:3px}
 .g-tabs button{flex:1;height:36px;border:0;border-radius:9px;background:transparent;color:var(--muted);font-weight:700}
 .g-tabs button[aria-pressed="true"]{background:var(--surface);color:var(--ink);box-shadow:0 1px 2px rgba(0,0,0,.12)}
-.g-nav{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}
+.g-nav{display:flex;align-items:center;justify-content:flex-end;gap:8px;flex-wrap:wrap}
 .g-chips button,.g-toggle{height:32px;min-width:42px;padding:0 10px;border-radius:9px;border:1px solid var(--line);background:var(--surface);color:var(--ink);font-weight:700;font-size:.85rem}
 .g-chips button[aria-pressed="true"],.g-toggle[aria-pressed="true"]{background:var(--ink);border-color:var(--ink);color:var(--bg)}
 .g-page{display:flex;align-items:center;gap:4px;font-family:var(--f-mono);font-size:.78rem;color:var(--muted);font-variant-numeric:tabular-nums}
@@ -281,3 +281,5 @@ mark{background:color-mix(in srgb,var(--st-awake) 45%,transparent);color:inherit
 .g-dstats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px 10px}
 .g-stat b{display:block;font-family:var(--f-mono);font-size:1rem;font-variant-numeric:tabular-nums}
 .g-stat span{font-size:.72rem;color:var(--muted)}
+.g-trail-label{fill:var(--ink);font-size:11px;font-weight:700;paint-order:stroke;stroke:var(--bg);stroke-width:3px;stroke-linejoin:round}
+.g-legend-row{margin-top:4px}

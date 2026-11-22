@@ -2,7 +2,7 @@
    the log box is pinned to the bottom and rides up with the keyboard.
    Strava = orange outlined boxes, Fitbit = blue outlined boxes, your own entries = plain rows. */
 :root{
-  --bg:#F3F4F3; --surface:#FFFFFF; --sunk:#EBEDEC; --ink:#15201D; --muted:#5A6865; --faint:#8A9794; --line:#D7DDDB; --cal:#B4BDBA; --checkin:#7C5CBF;
+  --bg:#F3F4F3; --surface:#FFFFFF; --sunk:#EBEDEC; --ink:#15201D; --muted:#5A6865; --faint:#8A9794; --line:#D7DDDB; --cal:#B4BDBA; --checkin:#7C5CBF; --g-rhr:#C8413B; --g-hrv:#1967D2; --g-lower:#1F9E89;
   --accent:#15201D; --accent-ink:#FFFFFF; --edit:#1967D2; --danger:#B4321F; --scrim:rgba(8,12,11,.9);
   --strava:#E8590C; --strava-ink:#B4400A; --fitbit:#1967D2; --fitbit-ink:#1558B0; --live-line:#A9C6F5;
   --st-awake:#F2994A; --st-rem:#56CCF2; --st-light:#2F80ED; --st-deep:#3D2C8D;
@@ -13,7 +13,7 @@
   color-scheme:light;
 }
 @media (prefers-color-scheme: dark){ :root{
-  --bg:#0E1412; --surface:#171F1C; --sunk:#111816; --ink:#E3EBE8; --muted:#93A39F; --faint:#64726E; --line:#29342F; --cal:#4B5652; --checkin:#A68BE3;
+  --bg:#0E1412; --surface:#171F1C; --sunk:#111816; --ink:#E3EBE8; --muted:#93A39F; --faint:#64726E; --line:#29342F; --cal:#4B5652; --checkin:#A68BE3; --g-rhr:#F27A6E; --g-hrv:#5B9BF0; --g-lower:#45C7AE;
   --accent:#E3EBE8; --accent-ink:#0E1412; --edit:#7CA8FF; --danger:#FF8A75;
   --strava:#FF7A3D; --strava-ink:#FF9A66; --fitbit:#5B9BF0; --fitbit-ink:#8DB8F5; --live-line:#2C4A78;
   --st-awake:#F2A35E; --st-rem:#6AD3F5; --st-light:#4A93F0; --st-deep:#7A6AE0;
@@ -246,3 +246,38 @@ mark{background:color-mix(in srgb,var(--st-awake) 45%,transparent);color:inherit
 .ci-sec textarea{width:100%;border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:10px 12px;font-size:16px;line-height:1.4;resize:none;overflow:hidden;min-height:64px;color:var(--ink)}
 .box.checkin{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
 .ci-part{font-size:.85rem;font-weight:600;color:var(--muted);margin-top:2px}
+
+/* Graphs page */
+.g-tabs,.g-chips{display:flex;gap:6px}
+.g-tabs{margin:12px 0 14px;background:var(--sunk);border-radius:12px;padding:3px}
+.g-tabs button{flex:1;height:36px;border:0;border-radius:9px;background:transparent;color:var(--muted);font-weight:700}
+.g-tabs button[aria-pressed="true"]{background:var(--surface);color:var(--ink);box-shadow:0 1px 2px rgba(0,0,0,.12)}
+.g-nav{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}
+.g-chips button,.g-toggle{height:32px;min-width:42px;padding:0 10px;border-radius:9px;border:1px solid var(--line);background:var(--surface);color:var(--ink);font-weight:700;font-size:.85rem}
+.g-chips button[aria-pressed="true"],.g-toggle[aria-pressed="true"]{background:var(--ink);border-color:var(--ink);color:var(--bg)}
+.g-page{display:flex;align-items:center;gap:4px;font-family:var(--f-mono);font-size:.78rem;color:var(--muted);font-variant-numeric:tabular-nums}
+.g-page button{width:32px;height:32px;border-radius:9px;border:1px solid var(--line);background:var(--surface);color:var(--ink);font-size:1.1rem;padding:0}
+.g-page button:disabled{opacity:.35}
+.g-readout{margin:12px 0 4px;font-size:.85rem;color:var(--faint);min-height:1.3em}
+.g-readout.on{color:var(--ink);font-weight:700}
+.g-panel{margin-top:6px;user-select:none;-webkit-user-select:none}
+.g-phead{display:flex;align-items:baseline;gap:10px;padding-left:34px}
+.g-ptitle{font-weight:700;font-size:.85rem}
+.g-legend{display:flex;gap:8px;font-size:.75rem;color:var(--muted)}
+.g-legend i{display:inline-block;width:10px;height:3px;border-radius:2px;margin-right:4px;vertical-align:middle}
+.g-val{margin-left:auto;font-family:var(--f-mono);font-size:.78rem;color:var(--muted);font-variant-numeric:tabular-nums;text-align:right}
+.g-val.on{color:var(--ink)}
+.g-svg{display:block;overflow:visible}
+.g-grid{stroke:var(--line);stroke-width:1}
+.g-ytick,.g-xtick{fill:var(--faint);font-size:10px;font-family:var(--f-mono)}
+.g-axis{fill:var(--muted);font-size:11px}
+.g-none{fill:var(--faint);font-size:11px}
+.g-cursor{stroke:var(--ink);stroke-width:1;stroke-dasharray:3 3;opacity:.6}
+.g-help{margin:12px 0 8px;font-size:.82rem;color:var(--muted);line-height:1.45}
+.g-foot{display:block;margin:6px 0 0;font-size:.75rem;color:var(--faint)}
+.g-dot{cursor:pointer}
+.g-detail{margin-top:14px}
+.g-dhead{display:flex;justify-content:space-between;align-items:baseline}
+.g-dstats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px 10px}
+.g-stat b{display:block;font-family:var(--f-mono);font-size:1rem;font-variant-numeric:tabular-nums}
+.g-stat span{font-size:.72rem;color:var(--muted)}

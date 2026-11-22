@@ -16,7 +16,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=Atkinson+Hyperlegible:wght@400;700&family=JetBrains+Mono:wght@500&display=swap">
-<link rel="stylesheet" href="styles.css?v=20261111-0845">
+<link rel="stylesheet" href="styles.css?v=20261122-1000">
 </head>
 <body>
 
@@ -141,11 +141,31 @@
   <div class="refs-foot"><button type="submit" form="checkinForm" class="save-btn" id="ciSave">Save check-in</button></div>
 </section>
 
+<!-- Graphs: look-only charts -->
+<section class="refs-view" id="graphsView" hidden aria-label="Graphs">
+  <div class="refs-scroll">
+    <div class="col">
+      <div class="refs-head">
+        <h2>Graphs</h2>
+        <button type="button" class="link" id="graphsDone">Done</button>
+      </div>
+      <div class="g-tabs" id="graphsTabs">
+        <button type="button" data-tab="trends" aria-pressed="true">Trends</button>
+        <button type="button" data-tab="workouts" aria-pressed="false">Workouts</button>
+      </div>
+      <div id="graphsBody"></div>
+    </div>
+  </div>
+</section>
+
 <div class="sheet-backdrop" id="sheetBackdrop" hidden></div>
 <div class="sheet" id="sheet" role="dialog" aria-modal="true" aria-label="More options" hidden>
   <div class="sheet-grip" aria-hidden="true"></div>
   <button type="button" class="sheet-item" id="checkinBtn">
     <span class="sheet-title">Check-in</span><span class="sheet-sub">Mood, skin, soreness and eye, any time of day</span>
+  </button>
+  <button type="button" class="sheet-item" id="graphsBtn">
+    <span class="sheet-title">Graphs</span><span class="sheet-sub">Trends over time and workout heart rate vs pace</span>
   </button>
   <button type="button" class="sheet-item" id="syncStravaBtn">
     <span class="sheet-title">Sync Strava</span><span class="sheet-sub">Runs your Timeline Health shortcut</span>
@@ -163,7 +183,8 @@
 <div class="lightbox" id="lightbox" hidden><img alt="" id="lightImg"></div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.118.0/dist/umd/supabase.js"></script>
-<script src="config.js?v=20261111-0845"></script>
-<script src="app.js?v=20261111-0845"></script>
+<script src="config.js?v=20261122-1000"></script>
+<script src="app.js?v=20261122-1000"></script>
+<script src="graphs.js?v=20261122-1000"></script>
 </body>
 </html>
